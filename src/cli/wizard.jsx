@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import ConnectionForm from './components/ConnectionForm.jsx';
 import IndexSelector from './components/IndexSelector.jsx';
+import IndexInput from './components/IndexInput.jsx';
 import FieldSelector from './components/FieldSelector.jsx';
 import { createElasticsearchClient, testConnection } from '../core/elasticsearch/client.js';
 import { listIndices, getIndexMapping } from '../core/elasticsearch/indexManager.js';
@@ -105,15 +106,15 @@ export default function MigrationWizard({ onComplete, onCancel }) {
     }
   };
 
-  const handleIndexSelect = async (index) => {
-    setSelectedIndex(index);
+  const handleIndexSelect = async (indexName) => {
+    setSelectedIndex({ name: indexName });
     setLoading(true);
     setError(null);
 
     try {
-      logger.info('Loading index mapping', { index: index.name });
+      logger.info('Loading index mapping', { index: indexName });
       const client = await createElasticsearchClient(sourceConfig);
-      const indexMapping = await getIndexMapping(client, index.name);
+      const indexMapping = await getIndexMapping(client, indexName);
       
       // Log mapping structure for debugging
       logger.debug('Index mapping structure', { 
@@ -193,8 +194,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
 
       {step === 'select-index' && (
         <IndexSelector
-          indices={indices}
-          loading={false}
+          indices={indices.map(idx => idx.name)}
           onSelect={handleIndexSelect}
           onCancel={onCancel}
         />

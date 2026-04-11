@@ -12,53 +12,71 @@
 
 ---
 
-## Installation
+## Global install (recommended)
 
-### 1. Clone the repository
+```bash
+npm install -g migra-es
+migra-es
+```
+
+npm creates the command in your system PATH automatically:
+- **Linux / macOS** — symlink at `/usr/local/bin/migra-es` (or wherever your global bin is)
+- **Windows** — wrapper script at `%APPDATA%\npm\migra-es.cmd`
+
+No Node version managers required — works with the system Node.js or nvm/fnm.
+
+### First-run setup
+
+On first launch, migra-es creates `~/.migra-es/` automatically:
+
+```
+~/.migra-es/
+├── data/
+│   └── tasks.json    # created on first run
+└── logs/
+    ├── application-YYYY-MM-DD.log
+    └── error-YYYY-MM-DD.log
+```
+
+To configure Redis or default ES endpoints, create `~/.migra-es/.env`:
+
+```env
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+# Optional defaults (can be overridden in the wizard)
+ES_SOURCE_URL=http://es5-host:9200
+ES_DEST_URL=http://es9-host:9200
+```
+
+---
+
+## Install from source
 
 ```bash
 git clone https://github.com/your-org/migra-es.git
 cd migra-es
-```
-
-### 2. Install Node.js dependencies
-
-```bash
 npm install
+cp .env.example .env   # edit with your ES and Redis settings
+npm start
 ```
 
-### 3. Configure environment variables
+When running from source, `data/` and `logs/` are created in the project directory (the project `.env` sets `DATA_DIR=./data` and `LOG_DIR=./logs`).
+
+### Development mode (auto-reload)
 
 ```bash
-cp .env.example .env
+npm run dev
 ```
 
-Edit `.env` with your settings:
+---
 
-```env
-# Redis connection
-REDIS_HOST=localhost
-REDIS_PORT=6379
-# REDIS_PASSWORD=yourpassword   # uncomment if Redis requires auth
-
-# Default Elasticsearch endpoints (optional)
-# These are pre-filled in the wizard but can be overridden there
-ES_SOURCE_URL=http://source-host:9200
-ES_DEST_URL=http://dest-host:9200
-
-# Migration tuning
-MIGRATION_BATCH_SIZE=1000        # docs per writer job
-MIGRATION_WORKER_THREADS=4       # parallel writer workers
-MIGRATION_SCROLL_SIZE=5000       # docs per scroll page from source
-MIGRATION_SCROLL_TIMEOUT=5m      # ES scroll context timeout
-```
-
-### 4. Start Redis
+## Start Redis
 
 **Linux (systemd):**
 ```bash
 sudo systemctl start redis
-sudo systemctl enable redis   # start on boot
+sudo systemctl enable redis
 ```
 
 **macOS (Homebrew):**
@@ -71,63 +89,47 @@ brew services start redis
 docker run -d --name redis -p 6379:6379 redis:7-alpine
 ```
 
-Verify Redis is responding:
+Verify:
 ```bash
 redis-cli ping   # should print PONG
 ```
 
-### 5. Launch
-
-```bash
-npm start
-```
-
 ---
 
-## Development mode
+## Language
 
-Automatically reloads the application when source files change:
+The TUI auto-detects the OS locale. To force a language:
 
 ```bash
-npm run dev
+MIGRA_ES_LANG=en migra-es       # English
+MIGRA_ES_LANG=pt-BR migra-es    # Portuguese
 ```
 
----
+Or set permanently in `~/.migra-es/.env`:
 
-## Directory structure after first run
-
+```env
+MIGRA_ES_LANG=en
 ```
-migra-es/
-├── data/
-│   └── tasks.json          # Task history and saved connection profiles
-├── logs/
-│   ├── application-YYYY-MM-DD.log
-│   └── error-YYYY-MM-DD.log
-└── ...
-```
-
-Both directories are created automatically on first start.
 
 ---
 
 ## Upgrading
 
 ```bash
-git pull
-npm install
-npm start
+npm update -g migra-es
 ```
 
-Existing `data/tasks.json` and connection profiles are preserved across upgrades.
+Existing `~/.migra-es/data/tasks.json` and connection profiles are preserved across upgrades.
 
 ---
 
 ## Uninstalling
 
 ```bash
-# Remove the application directory
-cd ..
-rm -rf migra-es
+npm uninstall -g migra-es
+
+# Optionally remove all data
+rm -rf ~/.migra-es
 
 # Optionally flush Redis migration keys
 redis-cli KEYS "migration:*" | xargs redis-cli DEL
@@ -140,30 +142,31 @@ redis-cli KEYS "migration:*" | xargs redis-cli DEL
 ### Redis connection refused
 
 ```
-Falha ao conectar ao Redis. Certifique-se de que o Redis esta rodando.
+Failed to connect to Redis. Make sure Redis is running.
 ```
 
-Check that Redis is running and that `REDIS_HOST`/`REDIS_PORT` in `.env` are correct:
-
+Check:
 ```bash
 redis-cli -h $REDIS_HOST -p $REDIS_PORT ping
 ```
 
-### Elasticsearch connection errors in the wizard
-
-The wizard tests both source and destination connections before proceeding. If the test fails, verify:
-- The URL is reachable from this machine (`curl http://host:9200`)
-- TLS/certificate settings are correct
-- Authentication credentials are valid
-
-### Application does not quit on `Q`
-
-Press `Q` only from the main dashboard (home screen). From nested screens, `Esc` or `Q` returns to the dashboard first; then a second `Q` quits.
-
-### Reset all task state
+### Command not found after install
 
 ```bash
-rm data/tasks.json
+# Check npm global bin is in your PATH
+npm bin -g          # prints the bin directory
+echo $PATH          # check it's included
+```
+
+On macOS with Homebrew Node, add to `~/.zshrc` or `~/.bash_profile`:
+```bash
+export PATH="$(npm bin -g):$PATH"
+```
+
+### Reset all state
+
+```bash
+rm ~/.migra-es/data/tasks.json
 redis-cli KEYS "migration:*" | xargs redis-cli DEL
-npm start
+migra-es
 ```

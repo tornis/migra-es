@@ -19,6 +19,7 @@ import MigrationWizard from './wizard.jsx';
 import ProgressMonitor from './components/ProgressMonitor.jsx';
 import ConfirmDialog from './components/ConfirmDialog.jsx';
 import AppHeader from './components/AppHeader.jsx';
+import { t } from '../i18n/index.js';
 
 const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
 
@@ -27,26 +28,24 @@ const logger = createLogger('CLI');
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 function App() {
-  const [screen,           setScreen]           = useState('loading');
-  const [tasks,            setTasks]            = useState([]);
-  const [selectedTask,     setSelectedTask]     = useState(null);
-  const [reprocessTarget,  setReprocessTarget]  = useState(null); // task pending confirmation
-  const [error,            setError]            = useState(null);
+  const [screen,          setScreen]          = useState('loading');
+  const [tasks,           setTasks]           = useState([]);
+  const [selectedTask,    setSelectedTask]    = useState(null);
+  const [reprocessTarget, setReprocessTarget] = useState(null);
+  const [error,           setError]           = useState(null);
 
   const { exit }   = useApp();
   const { stdout } = useStdout();
   const rows  = stdout?.rows    ?? 24;
   const width = stdout?.columns ?? 80;
 
-  // ── Initialisation ──────────────────────────────────────────────────────────
+  // ── Initialisation ──────────────────────────────────────────────────────
 
   useEffect(() => {
     initialize();
   }, []);
 
-  // ── Live polling ────────────────────────────────────────────────────────────
-  // Refresh tasks every 2 s regardless of screen so the dashboard stays live.
-  // When a specific task is open in the monitor, also refresh its individual status.
+  // ── Live polling ────────────────────────────────────────────────────────
 
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -65,14 +64,13 @@ function App() {
     return () => clearInterval(interval);
   }, [screen, selectedTask?.id]);
 
-  // ── Keyboard ────────────────────────────────────────────────────────────────
+  // ── Keyboard ────────────────────────────────────────────────────────────
 
   useInput((input, key) => {
     if (input === 'q' || input === 'Q') {
       if (screen === 'home') {
-        // exit() restores terminal state (cursor, alt-screen).
-        // process.exit(0) is required because Bull queue connections
-        // (ioredis) keep the Node.js event loop alive after Ink unmounts.
+        // exit() restores terminal state; process.exit(0) forces Node to stop
+        // (Bull's ioredis connections keep the event loop alive otherwise).
         exit();
         process.exit(0);
       } else if (screen === 'monitor') {
@@ -101,7 +99,7 @@ function App() {
     }
   });
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────────────
 
   const initialize = async () => {
     try {
@@ -112,7 +110,7 @@ function App() {
 
       const redisOk = await testRedisConnection();
       if (!redisOk) {
-        setError('Falha ao conectar ao Redis. Certifique-se de que o Redis está rodando.');
+        setError(t('init.error_redis'));
         return;
       }
       logger.info('Redis OK');
@@ -126,7 +124,7 @@ function App() {
       setScreen('home');
     } catch (err) {
       logger.error('Initialisation failed', { error: err.message });
-      setError(`Erro na inicialização: ${err.message}`);
+      setError(`${t('init.error_title')}: ${err.message}`);
     }
   };
 
@@ -139,16 +137,12 @@ function App() {
     }
   };
 
-  // ── Wizard callbacks ─────────────────────────────────────────────────────────
+  // ── Wizard callbacks ────────────────────────────────────────────────────
 
   const handleNewMigration = () => {
     setScreen('wizard');
   };
 
-  /**
-   * Wizard complete: receives an array of migration configs (one per index).
-   * Creates and starts a task for each one, then returns to the dashboard.
-   */
   const handleWizardComplete = async (configs) => {
     try {
       logger.info('Creating migration tasks', { count: configs.length });
@@ -163,7 +157,7 @@ function App() {
       setScreen('home');
     } catch (err) {
       logger.error('Failed to create migration tasks', { error: err.message });
-      setError(`Erro ao criar migrações: ${err.message}`);
+      setError(`${t('init.error_title')}: ${err.message}`);
       setScreen('home');
     }
   };
@@ -172,12 +166,8 @@ function App() {
     setScreen('home');
   };
 
-  // ── Task controls ────────────────────────────────────────────────────────────
+  // ── Task controls ────────────────────────────────────────────────────────
 
-  /**
-   * Called from TaskList when user selects a task row.
-   * Supports inline quick actions via the _action property.
-   */
   const handleTaskSelect = async (task) => {
     if (task._action === 'pause')     { await handlePauseTask(task.id);  return; }
     if (task._action === 'resume')    { await handleResumeTask(task.id); return; }
@@ -202,7 +192,7 @@ function App() {
       await loadTasks();
     } catch (err) {
       logger.error('Reprocess failed', { error: err.message });
-      setError(`Erro ao reprocessar: ${err.message}`);
+      setError(`${t('init.error_title')}: ${err.message}`);
     } finally {
       setReprocessTarget(null);
     }
@@ -253,14 +243,14 @@ function App() {
     }
   };
 
-  // ── Screens ──────────────────────────────────────────────────────────────────
+  // ── Screens ──────────────────────────────────────────────────────────────
 
   if (screen === 'loading') {
     return (
       <Box flexDirection="column" minHeight={rows}>
         <AppHeader />
         <Box paddingX={4} flexGrow={1} flexDirection="column" justifyContent="center">
-          <Text>{yellow('⠋')} <Text dimColor>Inicializando — Redis, filas de tarefas, banco de dados...</Text></Text>
+          <Text>{yellow('⠋')} <Text dimColor>{t('init.loading')}</Text></Text>
         </Box>
         <Box flexDirection="column">
           <Text color="yellow" dimColor>{'─'.repeat(width)}</Text>
@@ -274,16 +264,16 @@ function App() {
       <Box flexDirection="column" minHeight={rows}>
         <AppHeader />
         <Box paddingX={4} flexGrow={1} flexDirection="column">
-          <Text color="red" bold>✗  Erro na inicialização</Text>
+          <Text color="red" bold>✗  {t('init.error_title')}</Text>
           <Text> </Text>
           <Text color="red">{error}</Text>
           <Text> </Text>
-          <Text dimColor>Verifique se o Redis está rodando:  redis-cli ping</Text>
+          <Text dimColor>{t('init.error_redis_hint')}</Text>
         </Box>
         <Box flexDirection="column">
           <Text color="yellow" dimColor>{'─'.repeat(width)}</Text>
           <Box paddingX={2}>
-            <Text>{yellow('Q')}<Text dimColor> sair</Text></Text>
+            <Text>{yellow('Q')}<Text dimColor>{t('keys.quit')}</Text></Text>
           </Box>
         </Box>
       </Box>
@@ -303,20 +293,16 @@ function App() {
   if (screen === 'confirm-reprocess' && reprocessTarget) {
     return (
       <ConfirmDialog
-        title="Reprocessar Migração"
+        title={t('reprocess.title')}
         lines={[
-          `Índice:   ${reprocessTarget.indexName}`,
-          `Destino:  ${reprocessTarget.destConfig?.url ?? '—'}`,
+          t('reprocess.index_label', { value: reprocessTarget.indexName }),
+          t('reprocess.dest_label',  { value: reprocessTarget.destConfig?.url ?? '—' }),
           reprocessTarget.controlField
-            ? `Controle: ${reprocessTarget.controlField}`
-            : 'Controle: nenhum',
+            ? t('reprocess.control_label', { value: reprocessTarget.controlField })
+            : t('reprocess.control_none'),
         ]}
-        warning={
-          `O índice "${reprocessTarget.indexName}" será APAGADO do servidor de destino ` +
-          `e toda a migração será reiniciada do zero. ` +
-          `Todos os documentos já migrados serão perdidos.`
-        }
-        confirmLabel="Sim, apagar e reprocessar"
+        warning={t('reprocess.warning', { index: reprocessTarget.indexName })}
+        confirmLabel={t('reprocess.confirm_label')}
         onConfirm={handleReprocessConfirm}
         onCancel={handleReprocessCancel}
       />

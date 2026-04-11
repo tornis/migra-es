@@ -1,0 +1,25 @@
+# Development files
+.env
+.env.*
+data/
+logs/
+*.log
+
+# Documentation (already in files whitelist selectively)
+INSTALL.md
+QUICKSTART.md
+EXAMPLES.md
+CONTRIBUTING.md
+
+# Dev tooling
+.vscode/
+.idea/
+*.tui_example*
+tui_example*
+
+# Git
+.git/
+.gitignore
+
+# CI
+.github/

@@ -1,18 +1,23 @@
 #!/usr/bin/env node
 
-import { spawn } from 'child_process';
+/**
+ * Global entry-point for `migra-es`.
+ *
+ * Uses tsx's programmatic ESM loader so the JSX source files are executed
+ * directly by the installed Node.js runtime — no separate build step needed,
+ * no spawn of a child process.
+ *
+ * tsx is in `dependencies` so it is always present when the package is
+ * installed globally via `npm install -g migra-es`.
+ */
+
+import { register } from 'tsx/esm/api';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join }  from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+register();
 
-// Execute the main CLI with tsx
-const child = spawn('tsx', [join(__dirname, '../src/cli/index.jsx')], {
-  stdio: 'inherit',
-  env: process.env
-});
+const __dirname  = dirname(fileURLToPath(import.meta.url));
+const entryPoint = join(__dirname, '..', 'src', 'cli', 'index.jsx');
 
-child.on('exit', (code) => {
-  process.exit(code || 0);
-});
+await import(entryPoint);

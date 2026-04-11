@@ -1,77 +1,56 @@
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import os from 'os';
 import fs from 'fs';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Resolve log directory the same way config.js does so the logger can be
+// imported before config is fully loaded without creating a circular dep.
+const APP_DIR = process.env.MIGRA_ES_DIR || path.join(os.homedir(), '.migra-es');
+const logDir  = process.env.LOG_DIR || path.join(APP_DIR, 'logs');
 
-// Create logs directory if it doesn't exist
-const logDir = process.env.LOG_DIR || path.join(process.cwd(), 'logs');
 if (!fs.existsSync(logDir)) {
   fs.mkdirSync(logDir, { recursive: true });
 }
 
-/**
- * Custom log format with timestamp and colors
- */
-const logFormat = winston.format.combine(
+// ── Formats ───────────────────────────────────────────────────────────────────
+
+const fileFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  winston.format.errors({ stack: true })
+  winston.format.errors({ stack: true }),
+  winston.format.json()
 );
 
-/**
- * Console format for better readability
- */
-const consoleFormat = winston.format.combine(
-  winston.format.colorize(),
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    let msg = `${timestamp} [${level}]: ${message}`;
-    if (Object.keys(meta).length > 0) {
-      msg += ` ${JSON.stringify(meta)}`;
-    }
-    return msg;
-  })
-);
+// ── Logger ────────────────────────────────────────────────────────────────────
 
-/**
- * Create Winston logger instance
- */
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
-  format: logFormat,
+  format: fileFormat,
   transports: [
-    // Console transport disabled for clean TUI
-    // Logs only go to files
-    
-    // Daily rotate file for all logs
+    // All logs — daily rotation
     new DailyRotateFile({
-      filename: path.join(logDir, 'application-%DATE%.log'),
+      filename:    path.join(logDir, 'application-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
-      maxSize: process.env.LOG_MAX_SIZE || '20m',
-      maxFiles: process.env.LOG_MAX_FILES || '14d',
-      format: logFormat
+      maxSize:     process.env.LOG_MAX_SIZE  || '20m',
+      maxFiles:    process.env.LOG_MAX_FILES || '14d',
+      format:      fileFormat,
     }),
-    
-    // Daily rotate file for errors only
+    // Errors only — daily rotation
     new DailyRotateFile({
-      filename: path.join(logDir, 'error-%DATE%.log'),
+      filename:    path.join(logDir, 'error-%DATE%.log'),
       datePattern: 'YYYY-MM-DD',
-      level: 'error',
-      maxSize: process.env.LOG_MAX_SIZE || '20m',
-      maxFiles: process.env.LOG_MAX_FILES || '14d',
-      format: logFormat
-    })
+      level:       'error',
+      maxSize:     process.env.LOG_MAX_SIZE  || '20m',
+      maxFiles:    process.env.LOG_MAX_FILES || '14d',
+      format:      fileFormat,
+    }),
   ],
-  exitOnError: false
+  exitOnError: false,
 });
 
 /**
- * Create child logger with specific context
- * @param {string} context - Context name (e.g., 'MigrationEngine', 'ElasticsearchClient')
- * @returns {winston.Logger} Child logger instance
+ * Create a child logger with a named context label.
+ * @param {string} context  e.g. 'MigrationEngine', 'CLI'
  */
 export function createLogger(context) {
   return logger.child({ context });

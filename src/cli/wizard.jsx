@@ -13,6 +13,7 @@ import { listIndices, getIndexMapping } from '../core/elasticsearch/indexManager
 import { getAllConnections, saveConnection } from '../database/connections.js';
 import { extractSortableFields } from '../utils/fieldUtils.js';
 import { createLogger } from '../utils/logger.js';
+import { t } from '../i18n/index.js';
 
 const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
 
@@ -41,14 +42,14 @@ export default function MigrationWizard({ onComplete, onCancel }) {
   const [connectionName, setConnectionName] = useState('');
   const [indices,        setIndices]        = useState([]);
   const [loading,        setLoading]        = useState(false);
-  const [loadingText,    setLoadingText]    = useState('Carregando...');
+  const [loadingText,    setLoadingText]    = useState(t('wizard.loading'));
   const [error,          setError]          = useState(null);
 
   const { stdout } = useStdout();
   const rows  = stdout?.rows    ?? 24;
   const width = stdout?.columns ?? 80;
 
-  // ── Load saved connections on mount ───────────────────────────────────────
+  // ── Load saved connections on mount ──────────────────────────────────────
 
   useEffect(() => {
     (async () => {
@@ -62,7 +63,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
     })();
   }, []);
 
-  // ── Global keyboard handler ────────────────────────────────────────────────
+  // ── Global keyboard handler ───────────────────────────────────────────────
 
   useInput((input, key) => {
     if (TEXT_INPUT_STEPS.has(step)) return;
@@ -87,27 +88,27 @@ export default function MigrationWizard({ onComplete, onCancel }) {
     const dc = connection.destConfig;
 
     try {
-      setLoadingText('Testando conexão de origem...');
+      setLoadingText(t('wizard.testing_source'));
       logger.info('Testing source', { url: sc.url });
       const srcClient = await createElasticsearchClient(sc);
       const srcResult = await testConnection(srcClient);
       await srcClient.close();
 
       if (!srcResult.success) {
-        setError(`Falha na conexão de origem (${sc.url}):\n${srcResult.error}`);
+        setError(t('wizard.error_source_url', { url: sc.url, error: srcResult.error }));
         setLoading(false);
         return;
       }
       logger.info('Source OK', { version: srcResult.version });
 
-      setLoadingText('Testando conexão de destino...');
+      setLoadingText(t('wizard.testing_dest'));
       logger.info('Testing destination', { url: dc.url });
       const dstClient = await createElasticsearchClient(dc);
       const dstResult = await testConnection(dstClient);
       await dstClient.close();
 
       if (!dstResult.success) {
-        setError(`Falha na conexão de destino (${dc.url}):\n${dstResult.error}`);
+        setError(t('wizard.error_dest_url', { url: dc.url, error: dstResult.error }));
         setLoading(false);
         return;
       }
@@ -118,7 +119,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
       await loadIndicesFromConfig(sc);
     } catch (err) {
       logger.error('Connection test failed', { error: err.message });
-      setError(`Erro ao testar conexões: ${err.message}`);
+      setError(t('wizard.error_test', { error: err.message }));
       setLoading(false);
     }
   };
@@ -134,7 +135,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
 
   const handleSourceSubmit = async (config) => {
     setLoading(true);
-    setLoadingText('Testando conexão de origem...');
+    setLoadingText(t('wizard.testing_source'));
     setError(null);
 
     try {
@@ -147,10 +148,10 @@ export default function MigrationWizard({ onComplete, onCancel }) {
         setSourceConfig(config);
         setStep('destination');
       } else {
-        setError(`Falha na conexão de origem: ${result.error}`);
+        setError(t('wizard.error_source', { error: result.error }));
       }
     } catch (err) {
-      setError(`Erro ao conectar à origem: ${err.message}`);
+      setError(t('wizard.error_src', { error: err.message }));
     } finally {
       setLoading(false);
     }
@@ -158,7 +159,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
 
   const handleDestSubmit = async (config) => {
     setLoading(true);
-    setLoadingText('Testando conexão de destino...');
+    setLoadingText(t('wizard.testing_dest'));
     setError(null);
 
     try {
@@ -171,10 +172,10 @@ export default function MigrationWizard({ onComplete, onCancel }) {
         setDestConfig(config);
         setStep('save-connection');
       } else {
-        setError(`Falha na conexão de destino: ${result.error}`);
+        setError(t('wizard.error_dest', { error: result.error }));
       }
     } catch (err) {
-      setError(`Erro ao conectar ao destino: ${err.message}`);
+      setError(t('wizard.error_dst', { error: err.message }));
     } finally {
       setLoading(false);
     }
@@ -187,7 +188,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
     if (!name) return;
 
     setLoading(true);
-    setLoadingText('Salvando conexão...');
+    setLoadingText(t('wizard.saving'));
 
     try {
       const conn = { id: randomUUID(), name, sourceConfig, destConfig };
@@ -205,7 +206,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
   // ─── Index loading ────────────────────────────────────────────────────────
 
   const loadIndicesFromConfig = async (srcConfig) => {
-    setLoadingText('Carregando lista de índices...');
+    setLoadingText(t('wizard.loading_indices'));
     try {
       const client = await createElasticsearchClient(srcConfig);
       const indexList = await listIndices(client);
@@ -214,7 +215,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
       setStep('select-indices');
     } catch (err) {
       logger.error('Failed to load indices', { error: err.message });
-      setError(`Erro ao carregar índices: ${err.message}`);
+      setError(t('wizard.error_indices', { error: err.message }));
     } finally {
       setLoading(false);
     }
@@ -264,16 +265,16 @@ export default function MigrationWizard({ onComplete, onCancel }) {
       <Box flexDirection="column" minHeight={rows}>
         <AppHeader />
         <Box paddingX={4} flexGrow={1} flexDirection="column">
-          <Text color="red" bold>✗  Erro de conexão</Text>
+          <Text color="red" bold>{t('wizard.error_title')}</Text>
           <Text> </Text>
           <Text color="red">{error}</Text>
           <Text> </Text>
-          <Text dimColor>Pressione Esc para voltar à seleção de conexões</Text>
+          <Text dimColor>{t('wizard.error_back')}</Text>
         </Box>
         <Box flexDirection="column">
           <Text color="yellow" dimColor>{'─'.repeat(width)}</Text>
           <Box paddingX={2}>
-            <Text>{yellow('Esc')}<Text dimColor> voltar</Text></Text>
+            <Text>{yellow('Esc')}<Text dimColor>{t('keys.back')}</Text></Text>
           </Box>
         </Box>
       </Box>
@@ -285,7 +286,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
       <Box flexDirection="column" minHeight={rows}>
         <AppHeader />
         <Box paddingX={4} flexGrow={1}>
-          <GeminiSpinner text="Carregando conexões salvas..." />
+          <GeminiSpinner text={t('wizard.loading_connections')} />
         </Box>
         <Text color="yellow" dimColor>{'─'.repeat(width)}</Text>
       </Box>
@@ -306,7 +307,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
   if (step === 'source') {
     return (
       <ConnectionForm
-        title="Configuração do Servidor de Origem"
+        title={t('wizard.source_title')}
         role="source"
         onSubmit={handleSourceSubmit}
         onCancel={onCancel}
@@ -317,7 +318,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
   if (step === 'destination') {
     return (
       <ConnectionForm
-        title="Configuração do Servidor de Destino"
+        title={t('wizard.dest_title')}
         role="destination"
         onSubmit={handleDestSubmit}
         onCancel={onCancel}
@@ -328,45 +329,45 @@ export default function MigrationWizard({ onComplete, onCancel }) {
   if (step === 'save-connection') {
     return (
       <Box flexDirection="column" minHeight={rows}>
-        <AppHeader subtitle="Salvar Conexão" />
+        <AppHeader subtitle={t('wizard.save_title')} />
         <Box paddingX={4} flexGrow={1} flexDirection="column">
 
-          <Text color="yellow" bold>Conexões testadas com sucesso</Text>
+          <Text color="yellow" bold>{t('wizard.save_ok')}</Text>
           <Text> </Text>
 
           {/* Source summary */}
           <Box borderStyle="single" borderColor="yellow" paddingX={2} paddingY={0} marginBottom={1} flexDirection="column">
             <Box gap={1}>
-              <Text backgroundColor="yellow" color="black" bold> ← ORIGEM </Text>
+              <Text backgroundColor="yellow" color="black" bold>{t('connection.source_badge')}</Text>
               <Text color="white">{sourceConfig?.url}</Text>
             </Box>
             {sourceConfig?.user && (
-              <Text dimColor>   Usuário: {sourceConfig.user}</Text>
+              <Text dimColor>   {t('connection.user_label')}{sourceConfig.user}</Text>
             )}
-            <Text dimColor>   SSL: {sourceConfig?.ssl ? 'Sim' : 'Não'}</Text>
+            <Text dimColor>   SSL: {sourceConfig?.ssl ? t('connection.yes') : t('connection.no')}</Text>
           </Box>
 
           {/* Destination summary */}
           <Box borderStyle="single" borderColor="green" paddingX={2} paddingY={0} marginBottom={1} flexDirection="column">
             <Box gap={1}>
-              <Text backgroundColor="green" color="black" bold> → DESTINO </Text>
+              <Text backgroundColor="green" color="black" bold>{t('connection.dest_badge')}</Text>
               <Text color="white">{destConfig?.url}</Text>
             </Box>
             {destConfig?.user && (
-              <Text dimColor>   Usuário: {destConfig.user}</Text>
+              <Text dimColor>   {t('connection.user_label')}{destConfig.user}</Text>
             )}
-            <Text dimColor>   SSL: {destConfig?.ssl ? 'Sim' : 'Não'}</Text>
+            <Text dimColor>   SSL: {destConfig?.ssl ? t('connection.yes') : t('connection.no')}</Text>
           </Box>
 
           <Text> </Text>
-          <Text>Dê um nome para salvar esta configuração:</Text>
+          <Text>{t('wizard.save_label')}</Text>
           <Box gap={1} marginTop={1}>
-            <Text dimColor>Nome: </Text>
+            <Text dimColor>{t('wizard.save_name')}</Text>
             <TextInput
               value={connectionName}
               onChange={setConnectionName}
               onSubmit={handleSaveConnectionSubmit}
-              placeholder="Ex: Produção ES5 → ES9"
+              placeholder={t('wizard.save_placeholder')}
             />
           </Box>
         </Box>
@@ -375,7 +376,7 @@ export default function MigrationWizard({ onComplete, onCancel }) {
           <Text color="yellow" dimColor>{'─'.repeat(width)}</Text>
           <Box paddingX={2}>
             <Text>
-              {yellow('Enter')}<Text dimColor> salvar e continuar</Text>
+              {yellow('Enter')}<Text dimColor>{t('keys.save_continue')}</Text>
             </Text>
           </Box>
         </Box>

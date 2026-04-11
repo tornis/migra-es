@@ -2,20 +2,12 @@ import React, { useState } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import gradient from 'gradient-string';
 import AppHeader from './AppHeader.jsx';
+import { t, tp, locale } from '../../i18n/index.js';
 
 const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
 const green  = gradient(['#34a853', '#0f9d58']);
 const red    = gradient(['#ea4335', '#c5221f']);
 const amber  = gradient(['#B8860B', '#DAA520']);
-
-const STATUS_LABEL = {
-  pending:   'Aguardando',
-  running:   'Em andamento',
-  paused:    'Pausada',
-  completed: 'Concluída',
-  failed:    'Falhou',
-  cancelled: 'Cancelada',
-};
 
 const STATUS_ICON = {
   pending:   '○',
@@ -52,12 +44,12 @@ function readPct(task) {
 }
 
 function fmt(n) {
-  return (n ?? 0).toLocaleString('pt-BR');
+  return (n ?? 0).toLocaleString(locale);
 }
 
 function fmtDate(iso) {
   if (!iso) return null;
-  const d = new Date(iso);
+  const d   = new Date(iso);
   const pad = n => String(n).padStart(2, '0');
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
@@ -65,19 +57,21 @@ function fmtDate(iso) {
 // ── Task row ──────────────────────────────────────────────────────────────────
 
 function TaskRow({ task, focused, barLen }) {
-  const p         = pct(task);
-  const rp        = readPct(task);
-  const col       = statusColor(task.status);
-  const icon      = STATUS_ICON[task.status] ?? '○';
-  const isActive  = ['running', 'paused'].includes(task.status);
+  const p        = pct(task);
+  const rp       = readPct(task);
+  const col      = statusColor(task.status);
+  const icon     = STATUS_ICON[task.status] ?? '○';
+  const isActive = ['running', 'paused'].includes(task.status);
 
-  const writeBar  = '█'.repeat(Math.round((p  / 100) * barLen)) + '░'.repeat(barLen - Math.round((p  / 100) * barLen));
-  const readBar   = '█'.repeat(Math.round((rp / 100) * barLen)) + '░'.repeat(barLen - Math.round((rp / 100) * barLen));
+  const writeBar = '█'.repeat(Math.round((p  / 100) * barLen)) + '░'.repeat(barLen - Math.round((p  / 100) * barLen));
+  const readBar  = '█'.repeat(Math.round((rp / 100) * barLen)) + '░'.repeat(barLen - Math.round((rp / 100) * barLen));
 
-  const written   = task.progress?.written  ?? task.progress?.processed ?? 0;
-  const enqueued  = task.progress?.enqueued ?? 0;
-  const total     = task.progress?.total    ?? 0;
-  const failed    = task.progress?.failed   ?? 0;
+  const written  = task.progress?.written  ?? task.progress?.processed ?? 0;
+  const enqueued = task.progress?.enqueued ?? 0;
+  const total    = task.progress?.total    ?? 0;
+  const failed   = task.progress?.failed   ?? 0;
+
+  const statusLabel = t(`status.${task.status}`) ?? task.status;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -88,7 +82,7 @@ function TaskRow({ task, focused, barLen }) {
           {icon} {task.indexName ?? task.name}
         </Text>
         <Text> </Text>
-        <Text>{col(STATUS_LABEL[task.status] ?? task.status)}</Text>
+        <Text>{col(statusLabel)}</Text>
         {task.controlField && (
           <Text dimColor>  ↳ {task.controlField}</Text>
         )}
@@ -97,30 +91,29 @@ function TaskRow({ task, focused, barLen }) {
       {/* Dates */}
       <Box marginLeft={4} gap={3}>
         {fmtDate(task.createdAt) && (
-          <Text dimColor>Criado: {fmtDate(task.createdAt)}</Text>
+          <Text dimColor>{t('dashboard.created')} {fmtDate(task.createdAt)}</Text>
         )}
         {fmtDate(task.completedAt) && (
-          <Text dimColor>Concluído: {fmtDate(task.completedAt)}</Text>
+          <Text dimColor>{t('dashboard.completed_at')} {fmtDate(task.completedAt)}</Text>
         )}
       </Box>
 
-      {/* Progress bars (only when we have data) */}
+      {/* Progress bars (only when active with data) */}
       {isActive && total > 0 && (
         <Box flexDirection="column" marginLeft={4}>
           <Box gap={1}>
-            <Text dimColor>Escrita  </Text>
+            <Text dimColor>{t('dashboard.write')}</Text>
             <Text>{yellow(writeBar)}</Text>
             <Text> {col(`${p}%`)}</Text>
-            <Text dimColor>  {fmt(written)} / {fmt(total)} docs</Text>
-            {failed > 0 && <Text color="red">  ✗ {fmt(failed)} falhas</Text>}
+            <Text dimColor>  {fmt(written)} / {fmt(total)} {t('dashboard.docs')}</Text>
+            {failed > 0 && <Text color="red">  ✗ {fmt(failed)} {t('dashboard.failures')}</Text>}
           </Box>
-          {/* Show read progress only if meaningfully ahead of write */}
           {enqueued > written + 1000 && (
             <Box gap={1}>
-              <Text dimColor>Leitura  </Text>
+              <Text dimColor>{t('dashboard.read')}</Text>
               <Text>{amber(readBar)}</Text>
               <Text> {amber(`${rp}%`)}</Text>
-              <Text dimColor>  {fmt(enqueued)} enfileirados</Text>
+              <Text dimColor>  {fmt(enqueued)} {t('dashboard.queued')}</Text>
             </Box>
           )}
         </Box>
@@ -130,8 +123,8 @@ function TaskRow({ task, focused, barLen }) {
       {!isActive && total > 0 && (
         <Box marginLeft={4}>
           <Text dimColor>
-            {fmt(written)} / {fmt(total)} docs
-            {failed > 0 && `  ✗ ${fmt(failed)} falhas`}
+            {fmt(written)} / {fmt(total)} {t('dashboard.docs')}
+            {failed > 0 && `  ✗ ${fmt(failed)} ${t('dashboard.failures')}`}
           </Text>
         </Box>
       )}
@@ -161,11 +154,10 @@ export default function TaskList({ tasks, onSelect, onNew }) {
 
   const [cursor, setCursor] = useState(0);
 
-  const active    = tasks.filter(t => ['running', 'paused', 'pending'].includes(t.status));
-  const done      = tasks.filter(t => ['completed', 'failed', 'cancelled'].includes(t.status));
-  const allRows   = [...active, ...done];
+  const active  = tasks.filter(t => ['running', 'paused', 'pending'].includes(t.status));
+  const done    = tasks.filter(t => ['completed', 'failed', 'cancelled'].includes(t.status));
+  const allRows = [...active, ...done];
 
-  // Stable bar length (leave room for labels)
   const BAR_LEN = Math.max(10, Math.min(30, totalWidth - 50));
 
   useInput((input, key) => {
@@ -193,7 +185,6 @@ export default function TaskList({ tasks, onSelect, onNew }) {
     if (focused && (input === 'c' || input === 'C') && ['running','paused'].includes(focused.status)) {
       onSelect({ ...focused, _action: 'cancel' });
     }
-    // Reprocess completed / failed tasks
     if (focused && (input === 'e' || input === 'E') && ['completed','failed','cancelled'].includes(focused.status)) {
       onSelect({ ...focused, _action: 'reprocess' });
     }
@@ -203,19 +194,18 @@ export default function TaskList({ tasks, onSelect, onNew }) {
     <Box flexDirection="column" minHeight={rows}>
       <AppHeader />
 
-      {/* Body */}
       <Box flexDirection="column" paddingX={2} flexGrow={1}>
 
-        {/* New migration shortcut */}
+        {/* New migration shortcut + active count */}
         <Box marginBottom={1}>
           <Text>
-            {yellow('N')}<Text dimColor> Nova Migração</Text>
+            {yellow('N')}<Text dimColor> {t('dashboard.new')}</Text>
           </Text>
           {active.length > 0 && (
             <Text>
               <Text dimColor>  •  </Text>
               <Text color="yellow">● {active.length}</Text>
-              <Text dimColor> migração{active.length > 1 ? 'ões' : ''} ativa{active.length > 1 ? 's' : ''}</Text>
+              <Text dimColor> {tp('dashboard.active', active.length)}</Text>
             </Text>
           )}
         </Box>
@@ -226,9 +216,9 @@ export default function TaskList({ tasks, onSelect, onNew }) {
         {active.length > 0 && (
           <>
             <Box marginTop={1} marginBottom={1}>
-              <Text color="yellow" bold>Ativas</Text>
+              <Text color="yellow" bold>{t('dashboard.section_active')}</Text>
             </Box>
-            {active.map((task, i) => (
+            {active.map((task) => (
               <TaskRow
                 key={task.id}
                 task={task}
@@ -244,7 +234,7 @@ export default function TaskList({ tasks, onSelect, onNew }) {
         {done.length > 0 && (
           <>
             <Box marginTop={1} marginBottom={1}>
-              <Text color="yellow" bold>Histórico</Text>
+              <Text color="yellow" bold>{t('dashboard.section_history')}</Text>
             </Box>
             {done.map((task) => (
               <TaskRow
@@ -260,8 +250,8 @@ export default function TaskList({ tasks, onSelect, onNew }) {
         {/* Empty state */}
         {tasks.length === 0 && (
           <Box flexDirection="column" paddingY={2}>
-            <Text dimColor>Nenhuma migração registrada.</Text>
-            <Text dimColor>Pressione <Text color="yellow">N</Text> para iniciar uma nova migração.</Text>
+            <Text dimColor>{t('dashboard.empty')}</Text>
+            <Text dimColor>{t('dashboard.empty_hint', { key: 'N' })}</Text>
           </Box>
         )}
       </Box>
@@ -270,18 +260,18 @@ export default function TaskList({ tasks, onSelect, onNew }) {
       <Box flexDirection="column">
         <Text color="yellow" dimColor>{'─'.repeat(totalWidth)}</Text>
         <Box paddingX={2} gap={2}>
-          <Text>{yellow('↑↓')}<Text dimColor> navegar</Text></Text>
-          <Text>{yellow('Enter')}<Text dimColor> monitorar</Text></Text>
-          <Text>{yellow('N')}<Text dimColor> nova migração</Text></Text>
-          {allRows[cursor]?.status === 'running'  && <Text>{yellow('P')}<Text dimColor> pausar</Text></Text>}
-          {allRows[cursor]?.status === 'paused'   && <Text>{yellow('R')}<Text dimColor> retomar</Text></Text>}
+          <Text>{yellow('↑↓')}<Text dimColor>{t('keys.navigate')}</Text></Text>
+          <Text>{yellow('Enter')}<Text dimColor>{t('keys.monitor')}</Text></Text>
+          <Text>{yellow('N')}<Text dimColor> {t('dashboard.new')}</Text></Text>
+          {allRows[cursor]?.status === 'running'  && <Text>{yellow('P')}<Text dimColor>{t('keys.pause')}</Text></Text>}
+          {allRows[cursor]?.status === 'paused'   && <Text>{yellow('R')}<Text dimColor>{t('keys.resume')}</Text></Text>}
           {['running','paused'].includes(allRows[cursor]?.status) && (
-            <Text>{yellow('C')}<Text dimColor> cancelar</Text></Text>
+            <Text>{yellow('C')}<Text dimColor>{t('keys.cancel')}</Text></Text>
           )}
           {['completed','failed','cancelled'].includes(allRows[cursor]?.status) && (
-            <Text>{yellow('E')}<Text dimColor> reprocessar</Text></Text>
+            <Text>{yellow('E')}<Text dimColor>{t('keys.reprocess')}</Text></Text>
           )}
-          <Text>{yellow('Q')}<Text dimColor> sair</Text></Text>
+          <Text>{yellow('Q')}<Text dimColor>{t('keys.quit')}</Text></Text>
         </Box>
       </Box>
     </Box>

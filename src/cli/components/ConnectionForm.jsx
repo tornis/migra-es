@@ -4,37 +4,24 @@ import TextInput from 'ink-text-input';
 import SelectInput from 'ink-select-input';
 import gradient from 'gradient-string';
 import AppHeader from './AppHeader.jsx';
+import { t } from '../../i18n/index.js';
 
 const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
 const amber  = gradient(['#B8860B', '#DAA520', '#B8860B']);
 const green  = gradient(['#34a853', '#0f9d58', '#34a853']);
 
-const YES_NO = [
-  { label: 'Sim', value: 'yes' },
-  { label: 'Não', value: 'no' },
-];
-
-const STEPS = [
-  'URL do Elasticsearch',
-  'Autenticação',
-  'Usuário',
-  'Senha',
-  'SSL',
-  'Verificar certificado SSL',
-];
-
-// ── Role badge ────────────────────────────────────────────────────────────────
+// ── Role badge ─────────────────────────────────────────────────────────────────
 
 function RoleBadge({ role }) {
   if (role === 'source') {
     return (
       <Box flexDirection="column" marginBottom={1}>
         <Box>
-          <Text backgroundColor="yellow" color="black" bold> ← ORIGEM </Text>
+          <Text backgroundColor="yellow" color="black" bold>{t('connection.source_badge')}</Text>
           <Text> </Text>
-          <Text>{amber('Elasticsearch legado (v2 / v5 / v6)')}</Text>
+          <Text>{amber(t('connection.source_tagline'))}</Text>
         </Box>
-        <Text dimColor>   Servidor de origem — dados que serão migrados</Text>
+        <Text dimColor>{t('connection.source_desc')}</Text>
       </Box>
     );
   }
@@ -43,11 +30,11 @@ function RoleBadge({ role }) {
     return (
       <Box flexDirection="column" marginBottom={1}>
         <Box>
-          <Text backgroundColor="green" color="black" bold> → DESTINO </Text>
+          <Text backgroundColor="green" color="black" bold>{t('connection.dest_badge')}</Text>
           <Text> </Text>
-          <Text>{green('Elasticsearch moderno (v8 / v9)')}</Text>
+          <Text>{green(t('connection.dest_tagline'))}</Text>
         </Box>
-        <Text dimColor>   Servidor de destino — receberá os documentos migrados</Text>
+        <Text dimColor>{t('connection.dest_desc')}</Text>
       </Box>
     );
   }
@@ -55,7 +42,7 @@ function RoleBadge({ role }) {
   return null;
 }
 
-// ── Step summary line (shown for completed steps) ─────────────────────────────
+// ── Step summary box (fills in as steps complete) ──────────────────────────────
 
 function StepSummary({ step, config }) {
   if (step < 1) return null;
@@ -63,14 +50,25 @@ function StepSummary({ step, config }) {
   const lines = [];
 
   if (step > 0) lines.push(
-    <Text key="url" dimColor> URL: <Text color="white">{config.url || '—'}</Text></Text>
+    <Text key="url" dimColor>{t('connection.summary.url')}<Text color="white">{config.url || '—'}</Text></Text>
   );
   if (step > 1) lines.push(
-    <Text key="auth" dimColor> Auth: <Text color="white">{config.user ? `${config.user} / ****` : 'Nenhuma'}</Text></Text>
+    <Text key="auth" dimColor>{t('connection.summary.auth')}<Text color="white">
+      {config.user ? `${config.user} / ****` : t('connection.summary.auth_none')}
+    </Text></Text>
   );
-  if (step > 4) lines.push(
-    <Text key="ssl" dimColor> SSL: <Text color="white">{config.ssl ? `Sim (verificar: ${config.rejectUnauthorized ? 'sim' : 'não'})` : 'Não'}</Text></Text>
-  );
+  if (step > 4) {
+    const sslText = config.ssl
+      ? t('connection.summary.ssl_yes', {
+          value: config.rejectUnauthorized
+            ? t('connection.summary.ssl_yes_value')
+            : t('connection.summary.ssl_no_value'),
+        })
+      : t('connection.summary.ssl_no');
+    lines.push(
+      <Text key="ssl" dimColor>{t('connection.summary.ssl')}<Text color="white">{sslText}</Text></Text>
+    );
+  }
 
   return (
     <Box flexDirection="column" marginBottom={1} borderStyle="single" borderColor="yellow" paddingX={1}>
@@ -83,8 +81,8 @@ function StepSummary({ step, config }) {
 
 /**
  * @param {object}  props
- * @param {string}  props.title      - Subtitle shown in AppHeader
- * @param {'source'|'destination'} props.role - Visual badge type
+ * @param {string}  props.title      - Subtitle shown in AppHeader (pre-translated)
+ * @param {'source'|'destination'} props.role
  * @param {Function} props.onSubmit  - Called with the final config object
  * @param {Function} props.onCancel
  */
@@ -96,6 +94,21 @@ export default function ConnectionForm({ title, role, onSubmit, onCancel }) {
   const [input, setInput] = useState('');
   const { stdout } = useStdout();
   const width = stdout?.columns ?? 80;
+
+  // Step labels resolved at render time so locale is respected
+  const STEPS = [
+    t('connection.steps.url'),
+    t('connection.steps.auth'),
+    t('connection.steps.user'),
+    t('connection.steps.password'),
+    t('connection.steps.ssl'),
+    t('connection.steps.ssl_verify'),
+  ];
+
+  const YES_NO = [
+    { label: t('connection.yes'), value: 'yes' },
+    { label: t('connection.no'),  value: 'no'  },
+  ];
 
   const handleUrlSubmit = () => {
     if (!input.trim()) return;
@@ -147,10 +160,10 @@ export default function ConnectionForm({ title, role, onSubmit, onCancel }) {
 
       <Box flexDirection="column" paddingX={4} flexGrow={1}>
 
-        {/* Role badge — explicit source/destination indicator */}
+        {/* Role badge */}
         <RoleBadge role={role} />
 
-        {/* Config summary box (fills in as steps complete) */}
+        {/* Config summary box */}
         <StepSummary step={step} config={config} />
 
         {/* Step progress dots */}
@@ -176,51 +189,53 @@ export default function ConnectionForm({ title, role, onSubmit, onCancel }) {
         {/* Step inputs */}
         {step === 0 && (
           <Box gap={1}>
-            <Text dimColor>URL: </Text>
+            <Text dimColor>{t('connection.url_label')}</Text>
             <TextInput
               value={input}
               onChange={setInput}
               onSubmit={handleUrlSubmit}
-              placeholder={role === 'destination' ? 'http://localhost:9200' : 'http://legacy-es:9200'}
+              placeholder={role === 'destination'
+                ? 'http://localhost:9200'
+                : 'http://legacy-es:9200'}
             />
           </Box>
         )}
 
         {step === 1 && (
           <Box flexDirection="column">
-            <Text dimColor>Usar autenticação básica (usuário/senha)?</Text>
+            <Text dimColor>{t('connection.auth_question')}</Text>
             <SelectInput items={YES_NO} onSelect={handleAuthSelect} />
           </Box>
         )}
 
         {step === 2 && (
           <Box gap={1}>
-            <Text dimColor>Usuário: </Text>
+            <Text dimColor>{t('connection.user_label')}</Text>
             <TextInput value={input} onChange={setInput} onSubmit={handleUserSubmit} />
           </Box>
         )}
 
         {step === 3 && (
           <Box gap={1}>
-            <Text dimColor>Senha: </Text>
+            <Text dimColor>{t('connection.pass_label')}</Text>
             <TextInput value={input} onChange={setInput} onSubmit={handlePassSubmit} mask="*" />
           </Box>
         )}
 
         {step === 4 && (
           <Box flexDirection="column">
-            <Text dimColor>Habilitar SSL/TLS?</Text>
+            <Text dimColor>{t('connection.ssl_question')}</Text>
             <SelectInput items={YES_NO} onSelect={handleSslSelect} />
           </Box>
         )}
 
         {step === 5 && (
           <Box flexDirection="column">
-            <Text dimColor>Verificar certificado SSL (recomendado para produção)?</Text>
+            <Text dimColor>{t('connection.ssl_verify_question')}</Text>
             <SelectInput
               items={[
-                { label: 'Sim — verificar (recomendado)', value: 'yes' },
-                { label: 'Não — ignorar certificado',      value: 'no'  },
+                { label: t('connection.yes_recommended'), value: 'yes' },
+                { label: t('connection.no_ignore'),       value: 'no'  },
               ]}
               onSelect={handleRejectSelect}
             />
@@ -233,8 +248,8 @@ export default function ConnectionForm({ title, role, onSubmit, onCancel }) {
         <Text color="yellow" dimColor>{'─'.repeat(width)}</Text>
         <Box paddingX={2}>
           <Text>
-            {yellow('Enter')}<Text dimColor> confirmar   </Text>
-            {yellow('Esc')}<Text dimColor> cancelar</Text>
+            {yellow('Enter')}<Text dimColor>{t('keys.confirm')}</Text>
+            {yellow('Esc')}<Text dimColor>{t('keys.back')}</Text>
           </Text>
         </Box>
       </Box>

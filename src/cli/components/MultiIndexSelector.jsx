@@ -3,6 +3,7 @@ import { Box, Text, useInput, useStdout } from 'ink';
 import gradient from 'gradient-string';
 import AppHeader from './AppHeader.jsx';
 import GeminiSpinner from './GeminiSpinner.jsx';
+import { t, tp } from '../../i18n/index.js';
 
 const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
 const green  = gradient(['#34a853', '#0f9d58']);
@@ -29,7 +30,7 @@ function Col1({ indices, cursor, focus, searchMode, query, visibleRows, queue })
   return (
     <Box flexDirection="column">
       <Text color="yellow" bold>
-        Índices
+        {t('indices.title')}
         <Text dimColor> ({indices.length})</Text>
       </Text>
       <Text color="yellow" dimColor>{'─'.repeat(30)}</Text>
@@ -42,12 +43,12 @@ function Col1({ indices, cursor, focus, searchMode, query, visibleRows, queue })
         </Box>
       ) : (
         <Box marginBottom={1}>
-          <Text dimColor>{yellow('/')} para buscar</Text>
+          <Text dimColor>{yellow('/')}{t('indices.search_hint')}</Text>
         </Box>
       )}
 
       {indices.length === 0 ? (
-        <Text dimColor>Nenhum índice encontrado</Text>
+        <Text dimColor>{t('indices.no_results')}</Text>
       ) : (
         visible.map((name, vi) => {
           const globalIdx   = offset + vi;
@@ -85,14 +86,13 @@ function Col2({ indexName, fields, fieldsLoading, cursor, focus }) {
   if (!indexName) {
     return (
       <Box flexDirection="column">
-        <Text color="yellow" bold>Campo de Controle</Text>
+        <Text color="yellow" bold>{t('indices.field_title')}</Text>
         <Text color="yellow" dimColor>{'─'.repeat(30)}</Text>
-        <Text dimColor>← Selecione um índice</Text>
+        <Text dimColor>{t('indices.field_select_hint')}</Text>
       </Box>
     );
   }
 
-  // Add "no control field" option at the end
   const items = [
     ...fields.map(f => ({ name: f.name, type: f.type, noControl: false })),
     { name: null, type: null, noControl: true },
@@ -100,9 +100,7 @@ function Col2({ indexName, fields, fieldsLoading, cursor, focus }) {
 
   return (
     <Box flexDirection="column">
-      <Text color="yellow" bold>
-        Campo de Controle
-      </Text>
+      <Text color="yellow" bold>{t('indices.field_title')}</Text>
       <Text color="yellow" dimColor>{'─'.repeat(30)}</Text>
       <Text dimColor>
         {indexName.length > 27 ? indexName.slice(0, 24) + '…' : indexName}
@@ -110,12 +108,12 @@ function Col2({ indexName, fields, fieldsLoading, cursor, focus }) {
 
       {fieldsLoading ? (
         <Box marginTop={1}>
-          <GeminiSpinner text="Carregando campos" />
+          <GeminiSpinner text={t('indices.field_loading')} />
         </Box>
       ) : items.length === 1 /* only no-control option */ ? (
         <Box flexDirection="column" marginTop={1}>
-          <Text color="yellow" dimColor>⚠ Nenhum campo numérico/data</Text>
-          <Text dimColor>Sem checkpoint disponível.</Text>
+          <Text color="yellow" dimColor>{t('indices.field_no_numeric')}</Text>
+          <Text dimColor>{t('indices.field_no_checkpoint')}</Text>
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>
@@ -129,7 +127,7 @@ function Col2({ indexName, fields, fieldsLoading, cursor, focus }) {
                     : <Text>  </Text>
                   }
                   <Text color="yellow" dimColor bold={highlighted}>
-                    ⚠ Sem campo de controle
+                    {t('indices.field_no_control')}
                   </Text>
                 </Box>
               );
@@ -152,7 +150,7 @@ function Col2({ indexName, fields, fieldsLoading, cursor, focus }) {
 
       {!fieldsLoading && items.length > 1 && (
         <Box marginTop={1}>
-          <Text dimColor>Enter para adicionar à fila</Text>
+          <Text dimColor>{t('indices.field_add_hint')}</Text>
         </Box>
       )}
     </Box>
@@ -163,16 +161,16 @@ function Col3({ queue, cursor, focus, width }) {
   return (
     <Box flexDirection="column">
       <Text color="yellow" bold>
-        Fila de Migração
+        {t('indices.queue_title')}
         {queue.length > 0 && <Text dimColor> ({queue.length})</Text>}
       </Text>
       <Text color="yellow" dimColor>{'─'.repeat(Math.min(30, width))}</Text>
 
       {queue.length === 0 ? (
         <Box flexDirection="column" marginTop={1}>
-          <Text dimColor>Vazio</Text>
-          <Text dimColor>Selecione índice + campo</Text>
-          <Text dimColor>e pressione Enter</Text>
+          <Text dimColor>{t('indices.queue_empty')}</Text>
+          <Text dimColor>{t('indices.queue_empty_hint1')}</Text>
+          <Text dimColor>{t('indices.queue_empty_hint2')}</Text>
         </Box>
       ) : (
         queue.map((item, i) => {
@@ -193,10 +191,10 @@ function Col3({ queue, cursor, focus, width }) {
               <Box marginLeft={4}>
                 {item.controlField
                   ? <Text color="green">↳ {item.controlField}</Text>
-                  : <Text color="yellow" dimColor>↳ sem controle ⚠</Text>
+                  : <Text color="yellow" dimColor>{t('indices.queue_no_control')}</Text>
                 }
                 {highlighted && (
-                  <Text dimColor> [D] remover</Text>
+                  <Text dimColor>{t('indices.queue_remove_hint')}</Text>
                 )}
               </Box>
             </Box>
@@ -208,7 +206,7 @@ function Col3({ queue, cursor, focus, width }) {
         <Box marginTop={1} flexDirection="column">
           <Text color="yellow" dimColor>{'─'.repeat(Math.min(30, width))}</Text>
           <Text>
-            {yellow('S')}<Text dimColor> iniciar {queue.length} migração{queue.length > 1 ? 'ões' : ''}</Text>
+            {yellow('S')}<Text dimColor>{tp('indices.queue_start', queue.length, { count: queue.length })}</Text>
           </Text>
         </Box>
       )}
@@ -233,33 +231,32 @@ export default function MultiIndexSelector({ indices, onLoadFields, onConfirm, o
   const totalRows  = stdout?.rows    ?? 24;
 
   // Column widths
-  const DIVIDER_TOTAL = 4;  // 2 dividers × 2 chars each
+  const DIVIDER_TOTAL = 4;
   const PADX = 2;
   const available = totalWidth - DIVIDER_TOTAL - PADX * 2;
   const col1W = Math.floor(available * 0.30);
   const col2W = Math.floor(available * 0.32);
   const col3W = available - col1W - col2W;
 
-  // Visible rows in col1 (subtract header rows + footer)
   const HEADER_ROWS = 10;
   const FOOTER_ROWS = 3;
   const visibleRows = Math.max(5, totalRows - HEADER_ROWS - FOOTER_ROWS);
 
-  // ── State ──────────────────────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────────
 
-  const [focus,       setFocus]       = useState('col1');
-  const [cursor1,     setCursor1]     = useState(0);
-  const [cursor2,     setCursor2]     = useState(0);
-  const [cursor3,     setCursor3]     = useState(0);
-  const [query,       setQuery]       = useState('');
-  const [searchMode,  setSearchMode]  = useState(false);
-  const [fields,      setFields]      = useState([]);
+  const [focus,         setFocus]         = useState('col1');
+  const [cursor1,       setCursor1]       = useState(0);
+  const [cursor2,       setCursor2]       = useState(0);
+  const [cursor3,       setCursor3]       = useState(0);
+  const [query,         setQuery]         = useState('');
+  const [searchMode,    setSearchMode]    = useState(false);
+  const [fields,        setFields]        = useState([]);
   const [fieldsLoading, setFieldsLoading] = useState(false);
-  const [queue,       setQueue]       = useState([]);
+  const [queue,         setQueue]         = useState([]);
 
   const fieldsCache = useRef({});
 
-  // ── Derived ────────────────────────────────────────────────────────────────
+  // ── Derived ───────────────────────────────────────────────────────────────
 
   const filteredIndices = useMemo(
     () => query
@@ -270,13 +267,12 @@ export default function MultiIndexSelector({ indices, onLoadFields, onConfirm, o
 
   const currentIndexName = filteredIndices[cursor1] ?? null;
 
-  // col2 items = fields + no-control option
   const col2Items = useMemo(() => [
     ...fields.map(f => ({ name: f.name, type: f.type, noControl: false })),
     { name: null, type: null, noControl: true },
   ], [fields]);
 
-  // ── Field loading ──────────────────────────────────────────────────────────
+  // ── Field loading ─────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!currentIndexName) { setFields([]); return; }
@@ -310,7 +306,7 @@ export default function MultiIndexSelector({ indices, onLoadFields, onConfirm, o
     return () => { cancelled = true; clearTimeout(timer); };
   }, [currentIndexName]); // eslint-disable-line
 
-  // ── Queue helpers ──────────────────────────────────────────────────────────
+  // ── Queue helpers ─────────────────────────────────────────────────────────
 
   const addToQueue = (indexName, controlField) => {
     setQueue(prev => {
@@ -329,10 +325,10 @@ export default function MultiIndexSelector({ indices, onLoadFields, onConfirm, o
     setCursor3(c => Math.max(0, c - (c > 0 ? 1 : 0)));
   };
 
-  // ── Keyboard ───────────────────────────────────────────────────────────────
+  // ── Keyboard ──────────────────────────────────────────────────────────────
 
   useInput((input, key) => {
-    // ── Search mode ─────────────────────────────────────────────────────────
+    // ── Search mode ──────────────────────────────────────────────────────
     if (searchMode) {
       if (key.escape) { setSearchMode(false); setQuery(''); setCursor1(0); return; }
       if (key.return) { setSearchMode(false); setCursor1(0); return; }
@@ -341,49 +337,29 @@ export default function MultiIndexSelector({ indices, onLoadFields, onConfirm, o
       return;
     }
 
-    // ── Global: start migration ──────────────────────────────────────────
+    // ── Global: start migration ──────────────────────────────────────
     if ((input === 's' || input === 'S') && queue.length > 0) {
       onConfirm(queue);
       return;
     }
 
-    // ── Column 1 ────────────────────────────────────────────────────────────
+    // ── Column 1 ────────────────────────────────────────────────────────
     if (focus === 'col1') {
-      if (key.upArrow) {
-        setCursor1(c => Math.max(0, c - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setCursor1(c => Math.min(filteredIndices.length - 1, c + 1));
-        return;
-      }
+      if (key.upArrow) { setCursor1(c => Math.max(0, c - 1)); return; }
+      if (key.downArrow) { setCursor1(c => Math.min(filteredIndices.length - 1, c + 1)); return; }
       if (input === '/') { setSearchMode(true); return; }
-      if (key.rightArrow || key.return || key.tab) {
-        setFocus('col2');
-        setCursor2(0);
-        return;
-      }
-      if (key.escape || input === 'q' || input === 'Q') {
-        onCancel();
-        return;
-      }
+      if (key.rightArrow || key.return || key.tab) { setFocus('col2'); setCursor2(0); return; }
+      if (key.escape || input === 'q' || input === 'Q') { onCancel(); return; }
     }
 
-    // ── Column 2 ────────────────────────────────────────────────────────────
+    // ── Column 2 ────────────────────────────────────────────────────────
     if (focus === 'col2') {
-      if (key.upArrow) {
-        setCursor2(c => Math.max(0, c - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setCursor2(c => Math.min(col2Items.length - 1, c + 1));
-        return;
-      }
+      if (key.upArrow) { setCursor2(c => Math.max(0, c - 1)); return; }
+      if (key.downArrow) { setCursor2(c => Math.min(col2Items.length - 1, c + 1)); return; }
       if (key.return) {
         if (currentIndexName && !fieldsLoading) {
           const selected = col2Items[cursor2];
           addToQueue(currentIndexName, selected?.noControl ? null : selected?.name ?? null);
-          // Advance to next index automatically
           setCursor1(c => Math.min(filteredIndices.length - 1, c + 1));
           setFocus('col1');
         }
@@ -393,16 +369,10 @@ export default function MultiIndexSelector({ indices, onLoadFields, onConfirm, o
       if (key.tab) { setFocus('col3'); return; }
     }
 
-    // ── Column 3 ────────────────────────────────────────────────────────────
+    // ── Column 3 ────────────────────────────────────────────────────────
     if (focus === 'col3') {
-      if (key.upArrow) {
-        setCursor3(c => Math.max(0, c - 1));
-        return;
-      }
-      if (key.downArrow) {
-        setCursor3(c => Math.min(queue.length - 1, c + 1));
-        return;
-      }
+      if (key.upArrow) { setCursor3(c => Math.max(0, c - 1)); return; }
+      if (key.downArrow) { setCursor3(c => Math.min(queue.length - 1, c + 1)); return; }
       if (input === 'd' || input === 'D' || key.delete || key.backspace) {
         removeFromQueue(cursor3);
         return;
@@ -415,7 +385,7 @@ export default function MultiIndexSelector({ indices, onLoadFields, onConfirm, o
 
   return (
     <Box flexDirection="column" minHeight={totalRows}>
-      <AppHeader subtitle="Seleção de Índices para Migração" />
+      <AppHeader subtitle={t('wizard.indices_title')} />
 
       {/* Three columns */}
       <Box flexDirection="row" paddingX={PADX} flexGrow={1}>
@@ -475,27 +445,27 @@ export default function MultiIndexSelector({ indices, onLoadFields, onConfirm, o
         <Box paddingX={2} gap={2}>
           {focus === 'col1' && (
             <>
-              <Text>{yellow('↑↓')}<Text dimColor> navegar</Text></Text>
-              <Text>{yellow('→/Enter')}<Text dimColor> campos</Text></Text>
-              <Text>{yellow('/')}<Text dimColor> buscar</Text></Text>
-              {queue.length > 0 && <Text>{yellow('S')}<Text dimColor> iniciar</Text></Text>}
-              <Text>{yellow('Esc')}<Text dimColor> cancelar</Text></Text>
+              <Text>{yellow('↑↓')}<Text dimColor>{t('keys.navigate')}</Text></Text>
+              <Text>{yellow('→/Enter')}<Text dimColor>{t('keys.fields')}</Text></Text>
+              <Text>{yellow('/')}<Text dimColor>{t('keys.search')}</Text></Text>
+              {queue.length > 0 && <Text>{yellow('S')}<Text dimColor>{t('keys.start')}</Text></Text>}
+              <Text>{yellow('Esc')}<Text dimColor>{t('keys.back')}</Text></Text>
             </>
           )}
           {focus === 'col2' && (
             <>
-              <Text>{yellow('↑↓')}<Text dimColor> navegar</Text></Text>
-              <Text>{yellow('Enter')}<Text dimColor> adicionar à fila</Text></Text>
-              <Text>{yellow('←/Esc')}<Text dimColor> voltar</Text></Text>
-              <Text>{yellow('Tab')}<Text dimColor> fila</Text></Text>
+              <Text>{yellow('↑↓')}<Text dimColor>{t('keys.navigate')}</Text></Text>
+              <Text>{yellow('Enter')}<Text dimColor>{t('keys.add_to_queue')}</Text></Text>
+              <Text>{yellow('←/Esc')}<Text dimColor>{t('keys.back')}</Text></Text>
+              <Text>{yellow('Tab')}<Text dimColor>{t('keys.queue_tab')}</Text></Text>
             </>
           )}
           {focus === 'col3' && (
             <>
-              <Text>{yellow('↑↓')}<Text dimColor> navegar</Text></Text>
-              <Text>{yellow('D')}<Text dimColor> remover</Text></Text>
-              {queue.length > 0 && <Text>{yellow('S')}<Text dimColor> iniciar</Text></Text>}
-              <Text>{yellow('Tab/Esc')}<Text dimColor> voltar</Text></Text>
+              <Text>{yellow('↑↓')}<Text dimColor>{t('keys.navigate')}</Text></Text>
+              <Text>{yellow('D')}<Text dimColor>{t('keys.remove')}</Text></Text>
+              {queue.length > 0 && <Text>{yellow('S')}<Text dimColor>{t('keys.start')}</Text></Text>}
+              <Text>{yellow('Tab/Esc')}<Text dimColor>{t('keys.back')}</Text></Text>
             </>
           )}
         </Box>

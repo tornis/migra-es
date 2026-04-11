@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, useStdout } from 'ink';
 import gradient from 'gradient-string';
+import { t } from '../../i18n/index.js';
 
 // ANSI Shadow font — "MIGRA-ES"
 const LOGO = [
@@ -31,8 +32,8 @@ export default function AppHeader({ subtitle }) {
       </Box>
 
       <Box paddingLeft={2} flexDirection="column" paddingBottom={1}>
-        <Text>{dim('Tool para migração de índices Elasticsearch versão 2, 5 e 6 para versões mais atuais')}</Text>
-        <Text dimColor>  © Tornis Tecnologia</Text>
+        <Text>{dim(t('app.tagline'))}</Text>
+        <Text dimColor>  {t('app.company')}</Text>
       </Box>
 
       {subtitle && (

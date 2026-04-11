@@ -1,137 +1,90 @@
 import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import SelectInput from 'ink-select-input';
 import gradient from 'gradient-string';
-import GeminiBox from './GeminiBox.jsx';
+import AppHeader from './AppHeader.jsx';
 
-/**
- * Index selector component with search and pagination
- * @param {object} props - Component props
- * @param {Array<string>} props.indices - List of indices
- * @param {Function} props.onSelect - Selection callback
- * @param {Function} props.onCancel - Cancel callback
- */
+const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
+const amber  = gradient(['#B8860B', '#DAA520']);
+
+const PAGE_SIZE = 12;
+
 export default function IndexSelector({ indices, onSelect, onCancel }) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [page, setPage] = useState(0);
-  const [mode, setMode] = useState('browse'); // 'browse' or 'search'
-  const geminiGradient = gradient(['#fbbc04', '#f4b400', '#ff9800', '#ffc107']);
-  
-  const PAGE_SIZE = 15;
+  const [query, setQuery]   = useState('');
+  const [page, setPage]     = useState(0);
+  const [search, setSearch] = useState(false);
+  const { stdout } = useStdout();
+  const width = stdout?.columns ?? 80;
+  const rows  = stdout?.rows ?? 24;
 
-  // Filter indices based on search
-  const filteredIndices = searchQuery
-    ? indices.filter(index => 
-        index.toLowerCase().includes(searchQuery.toLowerCase())
-      )
+  const filtered = query
+    ? indices.filter(i => i.toLowerCase().includes(query.toLowerCase()))
     : indices;
 
-  // Paginate
-  const totalPages = Math.ceil(filteredIndices.length / PAGE_SIZE);
-  const startIdx = page * PAGE_SIZE;
-  const endIdx = Math.min(startIdx + PAGE_SIZE, filteredIndices.length);
-  const paginatedIndices = filteredIndices.slice(startIdx, endIdx);
-
-  const items = [
-    // Add search option at top
-    {
-      label: geminiGradient('🔍 Buscar índice...'),
-      value: '__search__'
-    },
-    // Add indices
-    ...paginatedIndices.map(index => ({
-      label: index,
-      value: index
-    })),
-    // Add pagination controls
-    ...(page > 0 ? [{
-      label: geminiGradient('⬅️  Página anterior'),
-      value: '__prev__'
-    }] : []),
-    ...(page < totalPages - 1 ? [{
-      label: geminiGradient('➡️  Próxima página'),
-      value: '__next__'
-    }] : [])
-  ];
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const slice      = filtered.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
   useInput((input, key) => {
-    // Search mode
-    if (mode === 'search') {
-      if (key.escape) {
-        setMode('browse');
-        setSearchQuery('');
-      } else if (key.backspace || key.delete) {
-        setSearchQuery(prev => prev.slice(0, -1));
-        setPage(0);
-      } else if (input && !key.ctrl && !key.meta) {
-        setSearchQuery(prev => prev + input);
-        setPage(0);
-      }
-    }
+    if (!search) return;
+    if (key.escape)           { setSearch(false); setQuery(''); return; }
+    if (key.backspace || key.delete) { setQuery(q => q.slice(0, -1)); setPage(0); return; }
+    if (input && !key.ctrl && !key.meta) { setQuery(q => q + input); setPage(0); }
   });
 
+  const items = [
+    { label: yellow('  Buscar índice...'), value: '__search__' },
+    ...slice.map(i => ({ label: `  ${i}`, value: i })),
+    ...(page > 0            ? [{ label: amber('  ← Página anterior'), value: '__prev__' }] : []),
+    ...(page < totalPages-1 ? [{ label: amber('  → Próxima página'),  value: '__next__' }] : []),
+  ];
+
   const handleSelect = (item) => {
-    if (item.value === '__search__') {
-      setMode('search');
-    } else if (item.value === '__prev__') {
-      setPage(prev => Math.max(0, prev - 1));
-    } else if (item.value === '__next__') {
-      setPage(prev => Math.min(totalPages - 1, prev + 1));
-    } else {
-      onSelect(item.value);
-    }
+    if      (item.value === '__search__') setSearch(true);
+    else if (item.value === '__prev__')   setPage(p => p - 1);
+    else if (item.value === '__next__')   setPage(p => p + 1);
+    else                                  onSelect(item.value);
   };
 
   return (
-    <Box flexDirection="column" padding={1}>
-      <GeminiBox title="Selecione o Índice" color="yellow">
-        <Box flexDirection="column">
-          {indices.length === 0 ? (
-            <Text color="yellow">⚠️  Nenhum índice encontrado no cluster de origem.</Text>
-          ) : (
-            <>
-              <Box marginBottom={1}>
-                <Text>
-                  📊 Total: {geminiGradient(filteredIndices.length.toString())} índices
-                  {searchQuery && ` (filtrado de ${indices.length})`}
-                </Text>
-              </Box>
+    <Box flexDirection="column" minHeight={rows}>
+      <AppHeader subtitle="Selecionar Índice" />
 
-              {mode === 'search' && (
-                <Box marginBottom={1} flexDirection="column">
-                  <Text bold>{geminiGradient('🔍 Buscar: ')}{searchQuery}_</Text>
-                  <Text dimColor>Digite para filtrar, Esc para voltar</Text>
-                </Box>
-              )}
-
-              {filteredIndices.length > 0 ? (
-                <>
-                  <Box marginBottom={1}>
-                    <Text dimColor>
-                      Página {page + 1} de {totalPages} 
-                      {' '}({startIdx + 1}-{endIdx} de {filteredIndices.length})
-                    </Text>
-                  </Box>
-                  
-                  <SelectInput items={items} onSelect={handleSelect} />
-                </>
-              ) : (
-                <Text color="yellow">
-                  ⚠️  Nenhum índice encontrado com "{searchQuery}"
-                </Text>
-              )}
-            </>
-          )}
+      <Box flexDirection="column" paddingX={4} flexGrow={1}>
+        <Box marginBottom={1} gap={4}>
+          <Text>
+            <Text dimColor>Índices: </Text>
+            {yellow(String(filtered.length))}
+            {query && <Text dimColor> de {indices.length}</Text>}
+          </Text>
+          <Text dimColor>
+            Página {page + 1}/{totalPages || 1}
+            {' '}({page * PAGE_SIZE + 1}–{Math.min((page+1) * PAGE_SIZE, filtered.length)})
+          </Text>
         </Box>
-      </GeminiBox>
 
-      <Box marginTop={1}>
-        <Text dimColor>
-          {geminiGradient('↑↓')} Navegar  
-          {geminiGradient('Enter')} Selecionar  
-          {geminiGradient('/')} Buscar  
-          {geminiGradient('Esc')} Cancelar
-        </Text>
+        {search && (
+          <Box marginBottom={1} flexDirection="column">
+            <Text>{yellow('Buscar: ')}{query}<Text color="yellow">_</Text></Text>
+            <Text dimColor>  Digite para filtrar  •  Esc para voltar</Text>
+          </Box>
+        )}
+
+        {filtered.length === 0
+          ? <Text color="yellow">Nenhum índice encontrado com "{query}"</Text>
+          : <SelectInput items={items} onSelect={handleSelect} />
+        }
+      </Box>
+
+      <Box flexDirection="column">
+        <Text color="yellow" dimColor>{'─'.repeat(width)}</Text>
+        <Box paddingX={2}>
+          <Text>
+            {yellow('↑↓')}<Text dimColor> navegar   </Text>
+            {yellow('Enter')}<Text dimColor> selecionar   </Text>
+            {yellow('/')}<Text dimColor> buscar   </Text>
+            {yellow('Esc')}<Text dimColor> cancelar</Text>
+          </Text>
+        </Box>
       </Box>
     </Box>
   );

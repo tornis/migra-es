@@ -1,206 +1,169 @@
-# Guia de Instalação - Elasticsearch Migration Tool
+# Installation
 
-## Pré-requisitos
+## Prerequisites
 
-### 1. Node.js
-Versão mínima: 18.0.0
+| Requirement | Version | Notes |
+|---|---|---|
+| Node.js | >= 18.0.0 | `node --version` |
+| npm | >= 9 | Bundled with Node 18 |
+| Redis | >= 6.0 | Must be running before launch |
+| Source Elasticsearch | 2.x, 5.x, or 6.x | Network-accessible from this machine |
+| Destination Elasticsearch | 8.x or 9.x | Network-accessible from this machine |
 
-```bash
-# Verificar versão do Node.js
-node --version
+---
 
-# Se necessário, instalar Node.js 18+
-# Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt-get install -y nodejs
+## Installation
 
-# ou usando nvm
-nvm install 18
-nvm use 18
-```
-
-### 2. Redis
-O Redis é necessário para cache e gerenciamento de filas.
+### 1. Clone the repository
 
 ```bash
-# Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install redis-server
-
-# Iniciar Redis
-sudo systemctl start redis-server
-sudo systemctl enable redis-server
-
-# Verificar se está rodando
-redis-cli ping
-# Deve retornar: PONG
+git clone https://github.com/your-org/migra-es.git
+cd migra-es
 ```
 
-### 3. Elasticsearch
-- Elasticsearch 5.x (origem)
-- Elasticsearch 9.x (destino)
+### 2. Install Node.js dependencies
 
-## Instalação do Projeto
-
-### 1. Navegar até o diretório do projeto
-```bash
-cd /mnt/projetos/teste/migra-es
-```
-
-### 2. Instalar dependências
 ```bash
 npm install
 ```
 
-### 3. Configurar variáveis de ambiente
+### 3. Configure environment variables
+
 ```bash
-# Copiar arquivo de exemplo
 cp .env.example .env
-
-# Editar configurações
-nano .env  # ou use seu editor preferido
 ```
 
-### 4. Criar diretórios necessários
-```bash
-mkdir -p logs data
-```
+Edit `.env` with your settings:
 
-## Configuração
-
-### Arquivo .env
-
-Edite o arquivo `.env` com suas configurações:
-
-```bash
-# Elasticsearch de Origem (ES5)
-ES_SOURCE_URL=http://localhost:9200
-ES_SOURCE_USER=elastic
-ES_SOURCE_PASS=changeme
-ES_SOURCE_SSL=false
-ES_SOURCE_REJECT_UNAUTHORIZED=true
-
-# Elasticsearch de Destino (ES9)
-ES_DEST_URL=http://localhost:9201
-ES_DEST_USER=elastic
-ES_DEST_PASS=changeme
-ES_DEST_SSL=false
-ES_DEST_REJECT_UNAUTHORIZED=true
-
-# Redis
+```env
+# Redis connection
 REDIS_HOST=localhost
 REDIS_PORT=6379
-REDIS_PASSWORD=
-REDIS_DB=0
+# REDIS_PASSWORD=yourpassword   # uncomment if Redis requires auth
 
-# Performance
-BULK_SIZE=1000
-WORKER_THREADS=4
-SCROLL_SIZE=5000
-SCROLL_TIMEOUT=5m
-CACHE_TTL=3600
+# Default Elasticsearch endpoints (optional)
+# These are pre-filled in the wizard but can be overridden there
+ES_SOURCE_URL=http://source-host:9200
+ES_DEST_URL=http://dest-host:9200
 
-# Logging
-LOG_LEVEL=info
-LOG_DIR=./logs
+# Migration tuning
+MIGRATION_BATCH_SIZE=1000        # docs per writer job
+MIGRATION_WORKER_THREADS=4       # parallel writer workers
+MIGRATION_SCROLL_SIZE=5000       # docs per scroll page from source
+MIGRATION_SCROLL_TIMEOUT=5m      # ES scroll context timeout
 ```
 
-## Verificação da Instalação
+### 4. Start Redis
 
-### 1. Verificar Redis
+**Linux (systemd):**
 ```bash
-redis-cli ping
+sudo systemctl start redis
+sudo systemctl enable redis   # start on boot
 ```
 
-### 2. Verificar Elasticsearch de Origem
+**macOS (Homebrew):**
 ```bash
-curl http://localhost:9200
+brew services start redis
 ```
 
-### 3. Verificar Elasticsearch de Destino
+**Docker:**
 ```bash
-curl http://localhost:9201
+docker run -d --name redis -p 6379:6379 redis:7-alpine
 ```
 
-### 4. Testar a aplicação
+Verify Redis is responding:
+```bash
+redis-cli ping   # should print PONG
+```
+
+### 5. Launch
+
 ```bash
 npm start
 ```
 
-## Problemas Comuns
+---
 
-### Redis não está rodando
+## Development mode
+
+Automatically reloads the application when source files change:
+
 ```bash
-# Verificar status
-sudo systemctl status redis-server
-
-# Iniciar Redis
-sudo systemctl start redis-server
+npm run dev
 ```
 
-### Porta já em uso
-```bash
-# Verificar processos usando a porta
-sudo lsof -i :6379  # Redis
-sudo lsof -i :9200  # Elasticsearch origem
-sudo lsof -i :9201  # Elasticsearch destino
+---
+
+## Directory structure after first run
+
+```
+migra-es/
+├── data/
+│   └── tasks.json          # Task history and saved connection profiles
+├── logs/
+│   ├── application-YYYY-MM-DD.log
+│   └── error-YYYY-MM-DD.log
+└── ...
 ```
 
-### Permissões de arquivo
-```bash
-# Dar permissão de execução
-chmod +x src/cli/index.js
+Both directories are created automatically on first start.
 
-# Ajustar permissões dos diretórios
-chmod 755 logs data
-```
+---
 
-### Erro de módulo não encontrado
+## Upgrading
+
 ```bash
-# Limpar cache do npm e reinstalar
-rm -rf node_modules package-lock.json
+git pull
 npm install
+npm start
 ```
 
-## Instalação Global (Opcional)
+Existing `data/tasks.json` and connection profiles are preserved across upgrades.
 
-Para usar o comando `es-migrate` globalmente:
+---
+
+## Uninstalling
 
 ```bash
-npm link
+# Remove the application directory
+cd ..
+rm -rf migra-es
+
+# Optionally flush Redis migration keys
+redis-cli KEYS "migration:*" | xargs redis-cli DEL
 ```
 
-Agora você pode executar de qualquer lugar:
+---
+
+## Troubleshooting
+
+### Redis connection refused
+
+```
+Falha ao conectar ao Redis. Certifique-se de que o Redis esta rodando.
+```
+
+Check that Redis is running and that `REDIS_HOST`/`REDIS_PORT` in `.env` are correct:
+
 ```bash
-es-migrate
+redis-cli -h $REDIS_HOST -p $REDIS_PORT ping
 ```
 
-## Desinstalação
+### Elasticsearch connection errors in the wizard
+
+The wizard tests both source and destination connections before proceeding. If the test fails, verify:
+- The URL is reachable from this machine (`curl http://host:9200`)
+- TLS/certificate settings are correct
+- Authentication credentials are valid
+
+### Application does not quit on `Q`
+
+Press `Q` only from the main dashboard (home screen). From nested screens, `Esc` or `Q` returns to the dashboard first; then a second `Q` quits.
+
+### Reset all task state
 
 ```bash
-# Remover link global (se instalado)
-npm unlink
-
-# Remover dependências
-rm -rf node_modules
-
-# Remover dados e logs
-rm -rf data logs
+rm data/tasks.json
+redis-cli KEYS "migration:*" | xargs redis-cli DEL
+npm start
 ```
-
-## Próximos Passos
-
-Após a instalação bem-sucedida:
-
-1. Leia o [README.md](README.md) para entender o uso
-2. Execute `npm start` para iniciar a aplicação
-3. Siga o wizard interativo para configurar sua primeira migração
-
-## Suporte
-
-Se encontrar problemas durante a instalação:
-
-1. Verifique os logs em `logs/application-*.log`
-2. Certifique-se de que todas as dependências estão instaladas
-3. Verifique as versões do Node.js e Redis
-4. Confirme que os servidores Elasticsearch estão acessíveis

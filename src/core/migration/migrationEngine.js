@@ -1,48 +1,56 @@
-import { Worker } from 'worker_threads';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { createLogger } from '../../utils/logger.js';
 import { createElasticsearchClient } from '../elasticsearch/client.js';
-import { getIndexMapping, getIndexSettings, createIndex, getDocumentCount, indexExists } from '../elasticsearch/indexManager.js';
-import { getFieldRange, bulkIndex } from '../elasticsearch/bulkOperations.js';
+import {
+  getIndexMapping, getIndexSettings,
+  createIndex, getDocumentCount, indexExists,
+} from '../elasticsearch/indexManager.js';
+import { scrollDocuments, bulkIndex } from '../elasticsearch/bulkOperations.js';
 import { convertMapping } from './mappingConverter.js';
 import { convertSettings } from './analyzerConverter.js';
+import {
+  cacheMapping, cacheSettings,
+  getCachedMapping, getCachedSettings,
+} from '../cache/cacheStrategy.js';
+import { updateTaskProgress } from '../../database/db.js';
+import { getRedisClient } from '../cache/redisClient.js';
+import { getWriterQueue } from '../tasks/taskManager.js';
 import config from '../../utils/config.js';
-import { cacheMapping, cacheSettings, getCachedMapping, getCachedSettings } from '../cache/cacheStrategy.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const logger = createLogger('MigrationEngine');
 
+// ─── Reader ──────────────────────────────────────────────────────────────────
+
 /**
- * Perform migration from source to destination
- * @param {object} migrationConfig - Migration configuration
- * @param {Function} progressCallback - Progress callback function
- * @returns {Promise<object>} Migration result
+ * Reader: scrolls the source index and enqueues document batches to the
+ * writer queue via Redis-backed keys so Bull jobs stay small.
+ *
+ * Supports checkpoint-based resume: if `lastControlValue` is provided, the
+ * scroll query filters `controlField > lastControlValue`.
+ *
+ * @param {object} jobData
+ * @param {string} jobData.taskId
+ * @param {object} jobData.sourceConfig
+ * @param {object} jobData.destConfig
+ * @param {string} jobData.indexName
+ * @param {string|null} jobData.controlField
+ * @param {any} jobData.lastControlValue  - Resume checkpoint (null = start fresh)
+ * @param {Function} [onProgress]
  */
-export async function performMigration(migrationConfig, progressCallback) {
-  const {
-    taskId,
-    sourceConfig,
-    destConfig,
-    indexName,
-    controlField
-  } = migrationConfig;
+export async function runReader(jobData, onProgress) {
+  const { taskId, sourceConfig, destConfig, indexName, controlField, lastControlValue } = jobData;
 
-  logger.info('Starting migration', { taskId, indexName, controlField });
+  logger.info('Reader starting', { taskId, indexName, controlField, resume: lastControlValue != null });
 
+  const redis = getRedisClient();
   let sourceClient = null;
   let destClient = null;
 
   try {
-    // Create Elasticsearch clients
     sourceClient = await createElasticsearchClient(sourceConfig);
-    destClient = await createElasticsearchClient(destConfig);
+    destClient   = await createElasticsearchClient(destConfig);
 
-    // Get source index metadata
-    logger.info('Retrieving source index metadata', { indexName });
-    
+    // ── Prepare destination index ──────────────────────────────────────────
+
     let sourceMapping = await getCachedMapping(indexName);
     if (!sourceMapping) {
       sourceMapping = await getIndexMapping(sourceClient, indexName);
@@ -55,234 +63,207 @@ export async function performMigration(migrationConfig, progressCallback) {
       await cacheSettings(indexName, sourceSettings);
     }
 
-    // Convert mapping and settings to ES9 format
-    logger.info('Converting mapping and settings to ES9 format');
-    const es9Mapping = convertMapping(sourceMapping);
+    const es9Mapping  = convertMapping(sourceMapping);
     const es9Settings = convertSettings(sourceSettings);
 
-    // Create destination index if it doesn't exist
-    const destExists = await indexExists(destClient, indexName);
-    if (!destExists) {
+    if (!await indexExists(destClient, indexName)) {
       logger.info('Creating destination index', { indexName });
       await createIndex(destClient, indexName, es9Mapping, es9Settings);
     } else {
-      logger.warn('Destination index already exists', { indexName });
+      logger.warn('Destination index already exists, appending', { indexName });
     }
 
-    // Get total document count
-    const totalDocs = await getDocumentCount(sourceClient, indexName);
-    logger.info('Total documents to migrate', { count: totalDocs });
+    // ── Count total docs ───────────────────────────────────────────────────
 
-    // Initialize progress
-    const progress = {
-      total: totalDocs,
-      processed: 0,
-      failed: 0,
-      lastControlValue: null
-    };
+    const total = await getDocumentCount(sourceClient, indexName);
+    logger.info('Total documents in source', { indexName, total });
 
-    progressCallback(progress);
-
-    let min = null;
-    let max = null;
-
-    // Get field range for control field (if provided)
-    if (controlField) {
-      const range = await getFieldRange(sourceClient, indexName, controlField);
-      min = range.min;
-      max = range.max;
-      logger.info('Control field range', { field: controlField, min, max });
-    } else {
-      logger.warn('No control field provided - migration will run without checkpoints');
-    }
-
-    // Determine number of workers
-    const numWorkers = Math.min(config.migration.workerThreads, 4);
-    logger.info('Starting migration with workers', { numWorkers, hasControlField: !!controlField });
-
-    // For simplicity, we'll use a single-threaded approach here
-    // In production, you would split the range and use multiple workers
-    const result = await migrateDocuments(
-      sourceClient,
-      destClient,
-      indexName,
-      controlField,
-      min,
-      max,
-      progress,
-      progressCallback
-    );
-
-    logger.info('Migration completed', { 
-      taskId, 
-      indexName,
-      processed: result.processed,
-      failed: result.failed
+    await updateTaskProgress(taskId, {
+      total,
+      enqueued: 0,
+      lastControlValue,
+      readerDone: false,
     });
 
-    return result;
+    onProgress && onProgress({ total, enqueued: 0 });
 
-  } catch (error) {
-    logger.error('Migration failed', { 
-      taskId, 
-      indexName,
-      error: error.message,
-      stack: error.stack
-    });
-    throw error;
-  } finally {
-    // Close clients
-    if (sourceClient) {
-      await sourceClient.close();
-    }
-    if (destClient) {
-      await destClient.close();
-    }
-  }
-}
+    // ── Build scroll query ─────────────────────────────────────────────────
 
-/**
- * Migrate documents using scroll API
- * @param {Client} sourceClient - Source Elasticsearch client
- * @param {Client} destClient - Destination Elasticsearch client
- * @param {string} indexName - Index name
- * @param {string} controlField - Control field name
- * @param {any} minValue - Minimum control field value
- * @param {any} maxValue - Maximum control field value
- * @param {object} progress - Progress object
- * @param {Function} progressCallback - Progress callback
- * @returns {Promise<object>} Migration result
- */
-async function migrateDocuments(
-  sourceClient,
-  destClient,
-  indexName,
-  controlField,
-  minValue,
-  maxValue,
-  progress,
-  progressCallback
-) {
-  const scrollSize = config.migration.scrollSize;
-  const bulkSize = config.migration.bulkSize;
-  const scrollTimeout = config.migration.scrollTimeout;
+    const query = (controlField && lastControlValue != null)
+      ? { range: { [controlField]: { gt: lastControlValue } } }
+      : { match_all: {} };
 
-  let processedCount = 0;
-  let failedCount = 0;
-  let lastValue = minValue;
+    const sort = controlField ? [{ [controlField]: 'asc' }] : ['_doc'];
 
-  try {
-    // Build search body
-    const searchBody = {
-      query: {
-        match_all: {}
-      }
-    };
+    // ── Scroll + enqueue ───────────────────────────────────────────────────
 
-    // Add sorting only if control field is provided
-    if (controlField) {
-      searchBody.sort = [{ [controlField]: 'asc' }];
-    }
+    const writerQueue  = getWriterQueue();
+    const scrollSize   = config.migration.scrollSize;
+    const bulkSize     = config.migration.bulkSize;
 
-    // Initial search with scroll
-    let response = await sourceClient.search({
-      index: indexName,
-      scroll: scrollTimeout,
+    let enqueued            = 0;
+    let batchNum            = 0;
+    let currentControlValue = lastControlValue;
+
+    for await (const scrollBatch of scrollDocuments(sourceClient, indexName, {
       size: scrollSize,
-      body: searchBody
-    });
+      scroll: config.migration.scrollTimeout,
+      query,
+      sort,
+    })) {
+      // Check control flags before each batch
+      const [paused, cancelled] = await Promise.all([
+        redis.get(`migration:${taskId}:paused`),
+        redis.get(`migration:${taskId}:cancelled`),
+      ]);
 
-    let scrollId = response._scroll_id;
-    let hits = response.hits.hits;
+      if (cancelled) {
+        logger.info('Reader stopped: task cancelled', { taskId });
+        return { enqueued, cancelled: true };
+      }
 
-    while (hits && hits.length > 0) {
-      logger.debug('Processing batch', { count: hits.length });
+      if (paused) {
+        logger.info('Reader stopped: task paused', { taskId, checkpoint: currentControlValue });
+        return { enqueued, paused: true };
+      }
 
-      // Process in bulk batches
-      for (let i = 0; i < hits.length; i += bulkSize) {
-        const batch = hits.slice(i, i + bulkSize);
-        
-        try {
-          const bulkResult = await bulkIndex(destClient, indexName, batch);
-          processedCount += bulkResult.indexed;
-          failedCount += bulkResult.failed;
+      // Split scroll batch into writer-sized chunks
+      for (let i = 0; i < scrollBatch.length; i += bulkSize) {
+        const chunk = scrollBatch.slice(i, i + bulkSize);
+        if (chunk.length === 0) continue;
 
-          // Update last control value (only if control field exists)
-          if (controlField && batch.length > 0) {
-            const lastDoc = batch[batch.length - 1];
-            lastValue = lastDoc._source[controlField];
+        // Store docs in Redis (decoupled from Bull job payload)
+        const batchKey = `migration:${taskId}:batch:${batchNum}`;
+        await redis.set(batchKey, JSON.stringify(chunk), 'EX', 7200); // 2 hour TTL
+
+        // Increment pending counter BEFORE enqueuing so check-completion is correct
+        await redis.incr(`migration:${taskId}:pending`);
+
+        await writerQueue.add(
+          {
+            taskId,
+            destConfig,
+            indexName,
+            batchKey,
+            batchNum,
+            count: chunk.length,
+          },
+          {
+            attempts: config.migration.maxRetries,
+            backoff: { type: 'exponential', delay: config.migration.retryDelay },
           }
+        );
 
-          // Update progress
-          progress.processed = processedCount;
-          progress.failed = failedCount;
-          progress.lastControlValue = controlField ? lastValue : null;
-          progressCallback(progress);
+        batchNum++;
+        enqueued += chunk.length;
 
-          logger.debug('Batch processed', { 
-            indexed: bulkResult.indexed,
-            failed: bulkResult.failed,
-            total: processedCount
-          });
-
-        } catch (error) {
-          logger.error('Batch indexing failed', { error: error.message });
-          failedCount += batch.length;
+        // Advance checkpoint to last doc in chunk (if control field present)
+        if (controlField && chunk.length > 0) {
+          currentControlValue = chunk[chunk.length - 1]._source?.[controlField] ?? currentControlValue;
         }
       }
 
-      // Get next scroll batch
-      response = await sourceClient.scroll({
-        scroll_id: scrollId,
-        scroll: scrollTimeout
+      // Persist progress after each scroll batch
+      await updateTaskProgress(taskId, {
+        total,
+        enqueued,
+        lastControlValue: currentControlValue,
+        readerDone: false,
       });
 
-      scrollId = response._scroll_id;
-      hits = response.hits.hits;
+      onProgress && onProgress({ total, enqueued });
+      logger.debug('Scroll batch enqueued', { taskId, batchNum, enqueued });
     }
 
-    // Clear scroll
-    if (scrollId) {
-      await sourceClient.clearScroll({ scroll_id: scrollId });
+    // ── Mark reader done ───────────────────────────────────────────────────
+
+    // Re-check flags (could have been set during last batch)
+    const [paused, cancelled] = await Promise.all([
+      redis.get(`migration:${taskId}:paused`),
+      redis.get(`migration:${taskId}:cancelled`),
+    ]);
+
+    if (!paused && !cancelled) {
+      await updateTaskProgress(taskId, {
+        total,
+        enqueued,
+        lastControlValue: currentControlValue,
+        readerDone: true,
+      });
+
+      logger.info('Reader done — all batches enqueued', { taskId, enqueued });
+
+      // If no batches were enqueued at all (empty index), complete immediately
+      const pending = parseInt(await redis.get(`migration:${taskId}:pending`) || '0', 10);
+      if (pending <= 0) {
+        const { updateTaskStatus } = await import('../../database/db.js');
+        await updateTaskStatus(taskId, 'completed');
+        logger.info('Task completed immediately (empty source index)', { taskId });
+      }
     }
 
-    logger.info('Document migration completed', { 
-      processed: processedCount,
-      failed: failedCount
-    });
+    return { enqueued };
 
-    return {
-      processed: processedCount,
-      failed: failedCount,
-      lastControlValue: lastValue
-    };
-
-  } catch (error) {
-    logger.error('Document migration error', { error: error.message });
-    throw error;
+  } finally {
+    if (sourceClient) await sourceClient.close().catch(() => {});
+    if (destClient)   await destClient.close().catch(() => {});
   }
 }
 
+// ─── Writer ──────────────────────────────────────────────────────────────────
+
 /**
- * Resume migration from last checkpoint
- * @param {object} migrationConfig - Migration configuration
- * @param {any} lastControlValue - Last processed control value
- * @param {Function} progressCallback - Progress callback
- * @returns {Promise<object>} Migration result
+ * Writer: retrieves a document batch from Redis and bulk-indexes it to the
+ * destination ES cluster. Updates atomic Redis counters for progress tracking.
+ *
+ * @param {object} jobData
+ * @param {string} jobData.taskId
+ * @param {object} jobData.destConfig
+ * @param {string} jobData.indexName
+ * @param {string} jobData.batchKey  - Redis key holding the serialised docs
+ * @param {number} jobData.batchNum
  */
-export async function resumeMigration(migrationConfig, lastControlValue, progressCallback) {
-  logger.info('Resuming migration from checkpoint', { 
-    taskId: migrationConfig.taskId,
-    lastControlValue 
-  });
+export async function runWriter(jobData) {
+  const { taskId, destConfig, indexName, batchKey, batchNum } = jobData;
 
-  // Similar to performMigration but starts from lastControlValue
-  // Implementation would filter documents where controlField > lastControlValue
-  
-  return performMigration(migrationConfig, progressCallback);
+  const redis = getRedisClient();
+
+  // Skip if task was cancelled
+  const cancelled = await redis.get(`migration:${taskId}:cancelled`);
+  if (cancelled) {
+    logger.info('Writer batch skipped (cancelled)', { taskId, batchNum });
+    await redis.del(batchKey);
+    return { indexed: 0, failed: 0 };
+  }
+
+  // Load docs from Redis
+  const raw = await redis.get(batchKey);
+  if (!raw) {
+    logger.warn('Batch key not found in Redis (already processed or expired)', { taskId, batchKey });
+    return { indexed: 0, failed: 0 };
+  }
+
+  const docs = JSON.parse(raw);
+  let destClient = null;
+
+  try {
+    destClient = await createElasticsearchClient(destConfig);
+    const result = await bulkIndex(destClient, indexName, docs);
+
+    // Atomic progress counters
+    if (result.indexed > 0) await redis.incrby(`migration:${taskId}:written`, result.indexed);
+    if (result.failed  > 0) await redis.incrby(`migration:${taskId}:failed`,  result.failed);
+
+    logger.debug('Writer batch complete', {
+      taskId, batchNum,
+      indexed: result.indexed,
+      failed: result.failed,
+    });
+
+    return result;
+  } finally {
+    if (destClient) await destClient.close().catch(() => {});
+    // Delete the batch key regardless of success/failure
+    await redis.del(batchKey).catch(() => {});
+  }
 }
-
-export default {
-  performMigration,
-  resumeMigration
-};

@@ -35,7 +35,7 @@
     "tui",
     "cli"
   ],
-  "author": "",
+  "author": "Rodrigo Tornis <contato@tornis.com.br> (https://www.tornis.com.br)",
   "license": "MIT",
   "dependencies": {
     "@elastic/elasticsearch": "^8.12.0",

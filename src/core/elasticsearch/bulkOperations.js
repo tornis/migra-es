@@ -16,11 +16,21 @@ export async function bulkIndex(client, indexName, documents, retries = 3) {
   }
 
   try {
-    // Prepare bulk body
-    const body = documents.flatMap(doc => [
-      { index: { _index: indexName, _id: doc._id } },
-      doc._source
-    ]);
+    // Prepare bulk body.
+    // ES 2/5/6 documents carry a _type metadata field (e.g. "line", "event").
+    // ES 8/9 removed types entirely, so we preserve the value as a regular
+    // keyword field "source_type" in _source — but only when the type is
+    // meaningful (skip the default "_doc" introduced in ES 7+).
+    const body = documents.flatMap(doc => {
+      const source = { ...doc._source };
+      if (doc._type && doc._type !== '_doc') {
+        source.source_type = doc._type;
+      }
+      return [
+        { index: { _index: indexName, _id: doc._id } },
+        source,
+      ];
+    });
 
     logger.debug('Executing bulk index', { 
       index: indexName, 

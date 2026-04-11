@@ -1,84 +1,48 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import gradient from 'gradient-string';
 
-/**
- * Gemini-style box with gradient border (responsive)
- */
-export default function GeminiBox({ children, title, color = 'blue', variant = 'default' }) {
-  const gradients = {
-    blue: gradient(['#4285f4', '#34a853']),
-    green: gradient(['#34a853', '#0f9d58']),
-    yellow: gradient(['#fbbc04', '#f4b400']),
-    red: gradient(['#ea4335', '#c5221f']),
-    purple: gradient(['#9c27b0', '#673ab7']),
-    cyan: gradient(['#00bcd4', '#0097a7'])
-  };
+const GRADIENTS = {
+  yellow: gradient(['#FFD700', '#FFA500', '#FFEC00']),
+  green:  gradient(['#34a853', '#0f9d58']),
+  red:    gradient(['#ea4335', '#c5221f']),
+  cyan:   gradient(['#00bcd4', '#0097a7']),
+  dim:    gradient(['#888888', '#aaaaaa']),
+};
 
-  const grad = gradients[color] || gradients.yellow;
+export default function GeminiBox({ children, title, color = 'yellow', variant = 'rounded' }) {
+  const { stdout } = useStdout();
+  const termWidth = stdout?.columns ?? 80;
+  // leave 4 cols for outer padding (paddingX={2} on parent)
+  const boxWidth = Math.max(40, termWidth - 4);
+  const innerWidth = boxWidth - 4; // 1 border + 1 space each side
 
-  const borders = {
-    default: {
-      topLeft: '╭',
-      topRight: '╮',
-      bottomLeft: '╰',
-      bottomRight: '╯',
-      horizontal: '─',
-      vertical: '│'
-    },
-    double: {
-      topLeft: '╔',
-      topRight: '╗',
-      bottomLeft: '╚',
-      bottomRight: '╝',
-      horizontal: '═',
-      vertical: '║'
-    },
-    rounded: {
-      topLeft: '╭',
-      topRight: '╮',
-      bottomLeft: '╰',
-      bottomRight: '╯',
-      horizontal: '─',
-      vertical: '│'
-    }
-  };
+  const grad = GRADIENTS[color] ?? GRADIENTS.yellow;
 
-  const border = borders[variant] || borders.default;
+  const B = variant === 'double'
+    ? { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' }
+    : { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│' };
 
-  const boxWidth = 76; // Fixed width for consistent layout
+  const titleLine = title
+    ? ` ${title} `
+    : '';
+  const dashLen = boxWidth - 2 - titleLine.length;
+  const topBar   = B.tl + B.h.repeat(Math.max(0, Math.floor(dashLen / 2))) + titleLine + B.h.repeat(Math.max(0, Math.ceil(dashLen / 2))) + B.tr;
+  const bottomBar = B.bl + B.h.repeat(boxWidth - 2) + B.br;
 
   return (
-    <Box flexDirection="column" marginY={1}>
-      {/* Top border */}
+    <Box flexDirection="column" marginBottom={1}>
+      <Text>{grad(topBar)}</Text>
+
       <Box>
-        <Text>{grad(border.topLeft + border.horizontal.repeat(boxWidth) + border.topRight)}</Text>
-      </Box>
-      
-      {/* Title */}
-      {title && (
-        <Box>
-          <Text>{grad(border.vertical)} </Text>
-          <Box width={boxWidth - 2}>
-            <Text bold>{grad(title)}</Text>
-          </Box>
-          <Text> {grad(border.vertical)}</Text>
-        </Box>
-      )}
-      
-      {/* Content */}
-      <Box>
-        <Text>{grad(border.vertical)} </Text>
-        <Box width={boxWidth - 2} flexDirection="column">
+        <Text>{grad(B.v + ' ')}</Text>
+        <Box width={innerWidth} flexDirection="column">
           {children}
         </Box>
-        <Text> {grad(border.vertical)}</Text>
+        <Text>{grad(' ' + B.v)}</Text>
       </Box>
-      
-      {/* Bottom border */}
-      <Box>
-        <Text>{grad(border.bottomLeft + border.horizontal.repeat(boxWidth) + border.bottomRight)}</Text>
-      </Box>
+
+      <Text>{grad(bottomBar)}</Text>
     </Box>
   );
 }

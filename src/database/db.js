@@ -28,13 +28,19 @@ export async function initDatabase() {
   const dbPath = path.join(dataDir, 'tasks.json');
   const adapter = new JSONFile(dbPath);
   
-  db = new Low(adapter, { tasks: [] });
-  
+  db = new Low(adapter, { tasks: [], connections: [] });
+
   await db.read();
-  
+
   // Initialize default data if empty
   if (!db.data) {
-    db.data = { tasks: [] };
+    db.data = { tasks: [], connections: [] };
+    await db.write();
+  }
+
+  // Migrate existing databases that don't have connections array
+  if (!db.data.connections) {
+    db.data.connections = [];
     await db.write();
   }
 

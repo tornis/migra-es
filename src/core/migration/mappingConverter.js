@@ -23,12 +23,14 @@ export function convertMapping(es5Mapping) {
   // In ES5, mappings could have types: { "mappings": { "type_name": { "properties": {...} } } }
   // In ES9, types are removed: { "mappings": { "properties": {...} } }
   let sourceProperties = es5Mapping.properties;
-  
+  let hasTypedMapping  = false;
+
   if (!sourceProperties && es5Mapping) {
-    // Check if this is a typed mapping (ES5 style)
+    // Check if this is a typed mapping (ES5/6 style with explicit type names)
     const keys = Object.keys(es5Mapping);
     if (keys.length > 0 && es5Mapping[keys[0]]?.properties) {
       sourceProperties = es5Mapping[keys[0]].properties;
+      hasTypedMapping  = true;
       logger.debug('Detected ES5 typed mapping, extracting properties');
     }
   }
@@ -40,6 +42,14 @@ export function convertMapping(es5Mapping) {
 
   // Convert properties recursively
   es9Mapping.properties = convertProperties(sourceProperties);
+
+  // ES2/5/6 have a _type metadata field per document.
+  // Since ES8+ removed types, we preserve the value as a regular keyword
+  // field called "source_type" so the information is not lost.
+  if (hasTypedMapping && !es9Mapping.properties.source_type) {
+    es9Mapping.properties.source_type = { type: 'keyword' };
+    logger.debug('Added source_type keyword field to preserve ES5 _type metadata');
+  }
 
   // Remove deprecated _all field if present
   if (es5Mapping._all !== undefined) {

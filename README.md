@@ -1,266 +1,296 @@
-# Elasticsearch Migration Tool
+# migra-es
 
-A powerful Terminal User Interface (TUI) tool for migrating data from Elasticsearch 5 to Elasticsearch 9 with automatic mapping and analyzer compatibility conversion.
+**migra-es** is an open-source terminal application for migrating Elasticsearch indices from legacy versions (2.x / 5.x / 6.x) to modern Elasticsearch 8/9.
+
+It features a full-screen TUI (terminal user interface), a producer/consumer job queue backed by Redis, live progress monitoring, checkpoint-based resume, and support for migrating multiple indices in a single session.
+
+---
 
 ## Features
 
-- 🎯 **Interactive TUI Wizard** - Step-by-step configuration process
-- 🔄 **Automatic Compatibility** - Converts ES5 mappings and analyzers to ES9 format
-- ⚡ **High Performance** - Multi-threaded migration with Redis caching
-- 📊 **Real-time Progress** - Live progress monitoring with detailed statistics
-- 💾 **Persistent Tasks** - Background processing with resume capability
-- 🔍 **Field-based Control** - Track migration progress using a control field
-- 🛡️ **Error Handling** - Automatic retries and comprehensive error logging
+- **Interactive TUI** — navigate with arrow keys; no config files needed for day-to-day use
+- **Connection profiles** — save source and destination server configurations for reuse
+- **Multi-index migration** — select and queue multiple indices in one wizard session
+- **Live dashboard** — real-time write and read progress bars, status, doc counts, and error counts
+- **Pause / Resume** — stop and continue a migration without losing progress (uses a sortable control field as checkpoint)
+- **Cancel** — gracefully stops both the reader and any queued writer batches
+- **Reprocess** — delete the destination index and restart from zero, with a confirmation step
+- **Mapping conversion** — automatically converts ES 2/5/6 mappings to ES 9 (type `string` → `text`/`keyword`, removes deprecated metadata fields)
+- **`source_type` field** — the ES 5/6 `_type` value is preserved as a `keyword` field in the destination
+- **Fault-tolerant queue** — Redis-backed Bull queues survive worker crashes; atomic counters track exact progress
+- **Structured logs** — Winston logger with daily rotation written to the `logs/` directory
 
-## Prerequisites
+---
 
-- Node.js >= 18.0.0
-- Redis server (for caching and task queue)
-- Elasticsearch 5.x (source)
-- Elasticsearch 9.x (destination)
+## Requirements
 
-## Installation
+| Dependency | Version |
+|---|---|
+| Node.js | >= 18 |
+| Redis | >= 6 (must be running before start) |
+| Source Elasticsearch | 2.x, 5.x, or 6.x |
+| Destination Elasticsearch | 8.x or 9.x |
 
-1. Clone the repository:
+---
+
+## Quick start
+
 ```bash
-cd /mnt/projetos/teste/migra-es
-```
+# 1. Clone the repository
+git clone https://github.com/your-org/migra-es.git
+cd migra-es
 
-2. Install dependencies:
-```bash
+# 2. Install dependencies
 npm install
-```
 
-3. Configure environment variables:
-```bash
+# 3. Configure environment
 cp .env.example .env
-# Edit .env with your configuration
+# Edit .env with your ES and Redis connection details
+
+# 4. Make sure Redis is running
+redis-cli ping  # should return PONG
+
+# 5. Launch
+npm start
 ```
 
-## Configuration
+See [INSTALL.md](INSTALL.md) for detailed setup instructions.
+See [QUICKSTART.md](QUICKSTART.md) for a step-by-step first-migration guide.
 
-Edit the `.env` file to configure:
-
-### Elasticsearch Source
-- `ES_SOURCE_URL` - Source Elasticsearch URL
-- `ES_SOURCE_USER` - Username (if authentication enabled)
-- `ES_SOURCE_PASS` - Password (if authentication enabled)
-- `ES_SOURCE_SSL` - Use SSL (true/false)
-- `ES_SOURCE_REJECT_UNAUTHORIZED` - Verify SSL certificates (true/false)
-
-### Elasticsearch Destination
-- `ES_DEST_URL` - Destination Elasticsearch URL
-- `ES_DEST_USER` - Username (if authentication enabled)
-- `ES_DEST_PASS` - Password (if authentication enabled)
-- `ES_DEST_SSL` - Use SSL (true/false)
-- `ES_DEST_REJECT_UNAUTHORIZED` - Verify SSL certificates (true/false)
-
-### Redis
-- `REDIS_HOST` - Redis host (default: localhost)
-- `REDIS_PORT` - Redis port (default: 6379)
-- `REDIS_PASSWORD` - Redis password (if required)
-
-### Performance Settings
-- `BULK_SIZE` - Bulk indexing batch size (default: 1000)
-- `WORKER_THREADS` - Number of worker threads (default: 4)
-- `SCROLL_SIZE` - Scroll API batch size (default: 5000)
-- `CACHE_TTL` - Cache time-to-live in seconds (default: 3600)
-
-### Logging
-- `LOG_LEVEL` - Logging level: debug, info, warn, error (default: info)
-- `LOG_DIR` - Log directory (default: ./logs)
+---
 
 ## Usage
 
-### Start the Application
+### Starting the application
 
 ```bash
 npm start
 ```
 
-Or make it executable:
+On startup, migra-es:
+1. Connects to the database (`data/tasks.json`)
+2. Tests the Redis connection
+3. Initialises the reader and writer Bull queues
+4. Shows the dashboard
 
-```bash
-chmod +x src/cli/index.js
-./src/cli/index.js
+### Dashboard (home screen)
+
+```
+ migra-es
+ ─────────────────────────────────────────────────────────────────
+ N  Nova Migracao   •  2 migracoes ativas
+
+ Ativas
+
+ ▶  orders  Em andamento  ↳ created_at
+    Criado: 11/04/2024 09:15
+    Escrita  ████████████░░░░░░░░░░░  52%    520.000 / 1.000.000 docs
+    Leitura  ████████████████░░░░░░░  68%    680.000 enfileirados
+
+ Historico
+
+    products  Concluida
+    Criado: 10/04/2024 14:00   Concluido: 10/04/2024 16:32
+    45.000 / 45.000 docs
+
+ ─────────────────────────────────────────────────────────────────
+ ↑↓ navegar   Enter monitorar   N nova migracao   Q sair
 ```
 
-### Migration Wizard Flow
+**Keyboard shortcuts on the dashboard:**
 
-1. **Source Configuration**
-   - Enter Elasticsearch source URL
-   - Configure authentication (if needed)
-   - Configure SSL settings
-   - Test connection
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate task list |
+| `Enter` | Open detailed monitor for focused task |
+| `N` | Start new migration wizard |
+| `P` | Pause focused running task |
+| `R` | Resume focused paused task |
+| `C` | Cancel focused running/paused task |
+| `E` | Reprocess focused completed/failed/cancelled task |
+| `Q` | Quit |
 
-2. **Destination Configuration**
-   - Enter Elasticsearch destination URL
-   - Configure authentication (if needed)
-   - Configure SSL settings
-   - Test connection
+### Migration wizard
 
-3. **Index Selection**
-   - View list of available indices
-   - Select index to migrate
-   - View index metadata (document count, size)
+Press `N` to start the wizard. It walks through:
 
-4. **Control Field Selection**
-   - Select a field to track migration progress
-   - Recommended: timestamp or ID fields
-   - Must be sortable (numeric or date type)
+1. **Select connection** — choose a saved profile or create a new one
+2. **Source configuration** — URL, optional user/password/TLS for the origin ES cluster
+3. **Destination configuration** — URL, optional user/password/TLS for the target ES cluster
+4. **Save profile** — optionally name and save the connection pair for future use
+5. **Index selector** — three-column view:
+   - *Left*: searchable index list (press `/` to filter); press `→` or `Enter` to select
+   - *Middle*: available sortable fields for the selected index (used as migration checkpoint)
+   - *Right*: migration queue; press `D` to remove an item, `S` to start all queued migrations
+6. **Confirmation** — destructive operations (reprocess) require explicit confirmation
 
-5. **Migration Process**
-   - Automatic mapping conversion (ES5 → ES9)
-   - Automatic analyzer conversion
-   - Index creation on destination
-   - Data migration with progress tracking
-   - Background task execution
+### Monitor screen
 
-### Monitoring
+Open by pressing `Enter` on any task. Shows:
+- Source and destination URLs
+- Write progress bar (docs indexed to destination)
+- Read/enqueue progress bar (docs read from source, when ahead of writes)
+- Pending batch count and reader status
+- Last checkpoint value
+- Docs per second and estimated time remaining
 
-The progress monitor shows:
-- Migration status (running, paused, completed, failed)
-- Progress bar with percentage
-- Documents processed / total
-- Failed documents count
-- Transfer rate (docs/second)
-- Elapsed time
-- Estimated time remaining
+**Keyboard shortcuts in the monitor:**
 
-### Controls
+| Key | Action |
+|-----|--------|
+| `P` | Pause |
+| `R` | Resume |
+| `C` | Cancel |
+| `Q` / `Esc` | Return to dashboard |
 
-- **P** - Pause migration
-- **R** - Resume migration
-- **C** - Cancel migration
-- **Q** - Close monitor / Quit application
-- **ESC** - Cancel current operation
-- **↑↓** - Navigate lists
-- **Enter** - Select option
+---
 
 ## Architecture
 
-### Project Structure
-
 ```
 src/
-├── cli/                    # TUI components
-│   ├── components/         # React Ink components
-│   ├── wizard.js          # Migration wizard
-│   └── index.js           # Main application
+├── cli/
+│   ├── index.jsx               # Root App component + screen state machine
+│   ├── wizard.jsx              # Multi-step migration wizard
+│   └── components/
+│       ├── AppHeader.jsx       # Top banner (shared across screens)
+│       ├── TaskList.jsx        # Dashboard with live task rows
+│       ├── ProgressMonitor.jsx # Detailed single-task monitor
+│       ├── ConnectionForm.jsx  # Source/destination connection form
+│       ├── MultiIndexSelector.jsx  # 3-column index + field + queue selector
+│       └── ConfirmDialog.jsx   # Destructive action confirmation screen
 ├── core/
-│   ├── elasticsearch/     # ES client and operations
-│   ├── migration/         # Migration engine and converters
-│   ├── cache/            # Redis caching
-│   └── tasks/            # Task management and queue
-├── utils/                # Utilities (logger, config, validators)
-└── database/             # LowDB persistence
+│   ├── elasticsearch/
+│   │   ├── client.js           # @elastic/elasticsearch v8 client factory
+│   │   ├── indexManager.js     # Mapping, settings, create, count, exists
+│   │   └── bulkOperations.js   # bulkIndex, scrollDocuments, getFieldRange
+│   ├── migration/
+│   │   ├── migrationEngine.js  # runReader (scroll + enqueue) and runWriter (bulk index)
+│   │   ├── mappingConverter.js # ES 2/5/6 → ES 9 mapping conversion
+│   │   └── analyzerConverter.js # Deprecated analyzer/filter upgrades
+│   ├── tasks/
+│   │   ├── taskManager.js      # Task CRUD, queue lifecycle, reprocess
+│   │   ├── queue.js            # initQueueProcessor (wires reader + writer)
+│   │   ├── readerQueue.js      # Bull reader processor (concurrency 4)
+│   │   └── writerQueue.js      # Bull writer processor (configurable concurrency)
+│   └── cache/
+│       ├── redisClient.js      # ioredis singleton
+│       └── cacheStrategy.js    # Redis cache for ES mappings/settings
+├── database/
+│   ├── db.js                   # LowDB JSON persistence (data/tasks.json)
+│   └── connections.js          # Connection profile CRUD
+└── utils/
+    ├── config.js               # .env → typed config object
+    ├── logger.js               # Winston + daily-rotate-file
+    ├── validators.js           # Zod schemas for wizard input
+    └── fieldUtils.js           # extractSortableFields from ES mapping
 ```
 
-### Key Components
+### Queue flow
 
-- **Elasticsearch Client** - Connection management with SSL/Auth support
-- **Mapping Converter** - ES5 → ES9 mapping compatibility
-- **Analyzer Converter** - ES5 → ES9 analyzer compatibility
-- **Migration Engine** - Multi-threaded data migration
-- **Task Manager** - Background task processing with Bull
-- **Cache Strategy** - Redis-based caching for performance
-- **TUI Components** - Interactive terminal interface
-
-## Mapping Conversions
-
-### ES5 → ES9 Changes
-
-| ES5 | ES9 | Notes |
-|-----|-----|-------|
-| `string` type | `text` or `keyword` | Based on analyzer |
-| `_all` field | Removed | Use `copy_to` instead |
-| `index: "analyzed"` | `index: true` | Boolean conversion |
-| `index: "not_analyzed"` | `type: "keyword"` | Type change |
-| `include_in_all` | Removed | Use `copy_to` |
-| `_timestamp` | Removed | Use manual field |
-| `_ttl` | Removed | Use ILM |
-
-### Analyzer Conversions
-
-- `snowball` → Custom analyzer with `stemmer` filter
-- `nGram` → `ngram`
-- `edgeNGram` → `edge_ngram`
-- `delimited_payload_filter` → `delimited_payload`
-- Deprecated filters are removed or replaced
-
-## Logging
-
-Logs are stored in the `logs/` directory:
-- `application-YYYY-MM-DD.log` - All logs
-- `error-YYYY-MM-DD.log` - Error logs only
-
-Log rotation:
-- Max file size: 20MB
-- Retention: 14 days
-
-## Troubleshooting
-
-### Redis Connection Failed
-```bash
-# Start Redis server
-redis-server
+```
+Wizard → createMigrationTask → startMigrationTask
+                                      │
+                              [migration-reader queue]
+                                      │
+                              runReader (migrationEngine)
+                              ├─ scroll source ES (batches)
+                              ├─ store batch payload in Redis (TTL 2h)
+                              ├─ INCR pending
+                              ├─ enqueue writer job (batchKey reference)
+                              └─ update progress (enqueued, lastControlValue)
+                                      │
+                              [migration-writer queue]  (concurrency N)
+                                      │
+                              runWriter (migrationEngine)
+                              ├─ read + delete batch from Redis
+                              ├─ bulkIndex to destination ES
+                              ├─ INCRBY written / failed
+                              └─ DECR pending → _checkCompletion
 ```
 
-### Elasticsearch Connection Failed
-- Verify URL and credentials
-- Check SSL settings
-- Ensure network connectivity
-- Check Elasticsearch is running
+### Pause / Resume
 
-### Migration Stuck
-- Check logs in `logs/` directory
-- Verify control field is sortable
-- Check source Elasticsearch health
-- Ensure sufficient memory
+- **Pause**: sets `migration:{id}:paused` Redis key; reader checks this flag before each batch and stops gracefully
+- **Resume**: clears the flag, resets `pending` counter, re-queues a reader job starting from `lastControlValue`
 
-### High Memory Usage
-- Reduce `BULK_SIZE`
-- Reduce `SCROLL_SIZE`
-- Reduce `WORKER_THREADS`
-- Decrease `CACHE_TTL`
+### `source_type` field
 
-## Performance Tuning
+Elasticsearch 2/5/6 documents carry a `_type` metadata field (e.g. `"line"`, `"event"`). Since ES 7+ removed types, migra-es:
 
-For large indices:
-1. Increase `BULK_SIZE` (e.g., 5000)
-2. Increase `WORKER_THREADS` (match CPU cores)
-3. Enable Redis caching
-4. Use SSD storage
-5. Increase Elasticsearch heap size
+1. **Mapping**: adds `source_type: { type: "keyword" }` to the destination mapping (only when the source uses typed mappings)
+2. **Documents**: copies `_type` value into `_source.source_type` during bulk indexing (skipped when `_type` is `"_doc"`)
 
-For slow networks:
-1. Decrease `BULK_SIZE`
-2. Increase `SCROLL_TIMEOUT`
-3. Enable compression
-4. Use local Redis
+---
 
-## Development
+## Configuration
 
-### Run in Development Mode
-```bash
-npm run dev
+Copy `.env.example` to `.env`:
+
+```env
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+# REDIS_PASSWORD=
+
+# Default Elasticsearch endpoints (optional — can also be set in the wizard)
+ES_SOURCE_URL=http://localhost:9200
+ES_DEST_URL=http://localhost:9201
+
+# Migration tuning
+MIGRATION_BATCH_SIZE=1000
+MIGRATION_WORKER_THREADS=4
+MIGRATION_SCROLL_SIZE=5000
+MIGRATION_SCROLL_TIMEOUT=5m
 ```
 
-### View Logs
+All wizard-entered connection details are stored in `data/tasks.json` and never need to be re-entered.
+
+---
+
+## Logs
+
 ```bash
-tail -f logs/application-*.log
+# Live application log
+tail -f logs/application-$(date +%Y-%m-%d).log
+
+# Live error log
+tail -f logs/error-$(date +%Y-%m-%d).log
 ```
 
-### Clear Completed Tasks
-Tasks are persisted in `data/tasks.json`. To clear:
+Logs rotate daily and are kept for 14 days by default.
+
+---
+
+## Resetting state
+
 ```bash
+# Remove all task history (dashboard will be empty after restart)
 rm data/tasks.json
+
+# Flush Redis migration keys (does not affect saved connection profiles)
+redis-cli KEYS "migration:*" | xargs redis-cli DEL
 ```
+
+---
 
 ## License
 
-MIT
+MIT License — Copyright (c) 2024 **Rodrigo Tornis** — [Tornis Tecnologia](https://www.tornis.com.br)
 
-## Support
+You are free to use, modify, and distribute this software under the terms of the MIT License. The copyright notice and this permission notice must be preserved in all copies or substantial portions of the software.
 
-For issues and questions, check the logs in `logs/` directory and ensure all prerequisites are met.
+See [LICENSE](LICENSE) for the full text.
+
+---
+
+## Author
+
+**Rodrigo Tornis**
+[Tornis Tecnologia](https://www.tornis.com.br)
+
+---
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

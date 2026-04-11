@@ -1,137 +1,197 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import gradient from 'gradient-string';
-import GeminiHeader from './GeminiHeader.jsx';
-import GeminiBox from './GeminiBox.jsx';
-import GeminiProgress from './GeminiProgress.jsx';
+import AppHeader from './AppHeader.jsx';
 import GeminiSpinner from './GeminiSpinner.jsx';
-import GeminiStatus from './GeminiStatus.jsx';
 
-/**
- * Progress monitor component with Gemini-style
- * @param {object} props - Component props
- * @param {object} props.task - Task object
- * @param {Function} props.onPause - Pause callback
- * @param {Function} props.onResume - Resume callback
- * @param {Function} props.onCancel - Cancel callback
- * @param {Function} props.onClose - Close callback
- */
+const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
+const green  = gradient(['#34a853', '#0f9d58']);
+const red    = gradient(['#ea4335', '#c5221f']);
+const amber  = gradient(['#B8860B', '#DAA520']);
+
+function fmt(n) {
+  return (n ?? 0).toLocaleString('pt-BR');
+}
+
+function fmtTime(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function pct(a, b) {
+  if (!b) return 0;
+  return Math.min(100, Math.floor((a / b) * 100));
+}
+
+function makeBar(value, total, barLen) {
+  const p      = pct(value, total);
+  const filled = Math.round((p / 100) * barLen);
+  return { bar: '█'.repeat(filled) + '░'.repeat(barLen - filled), p };
+}
+
 export default function ProgressMonitor({ task, onPause, onResume, onCancel, onClose }) {
   const [elapsed, setElapsed] = useState(0);
-  const geminiGradient = gradient(['#fbbc04', '#f4b400', '#ff9800', '#ffc107']);
+  const { stdout } = useStdout();
+  const width = stdout?.columns ?? 80;
+  const rows  = stdout?.rows    ?? 24;
 
   useEffect(() => {
-    if (task.status === 'running') {
-      const startTime = new Date(task.startedAt || task.createdAt).getTime();
-      const interval = setInterval(() => {
-        const now = Date.now();
-        setElapsed(Math.floor((now - startTime) / 1000));
-      }, 1000);
-
-      return () => clearInterval(interval);
-    }
+    if (task.status !== 'running') return;
+    const start = new Date(task.startedAt || task.createdAt).getTime();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(id);
   }, [task.status, task.startedAt, task.createdAt]);
 
-  const getProgressPercentage = () => {
-    if (!task.progress.total || task.progress.total === 0) {
-      return 0;
-    }
-    return Math.floor((task.progress.processed / task.progress.total) * 100);
-  };
+  const total    = task.progress?.total    ?? 0;
+  const written  = task.progress?.written  ?? task.progress?.processed ?? 0;
+  const enqueued = task.progress?.enqueued ?? written;
+  const failed   = task.progress?.failed   ?? 0;
+  const pending  = task.progress?.pending  ?? 0;
+  const readerDone = task.progress?.readerDone ?? false;
 
-  const formatTime = (seconds) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
+  const BAR_LEN   = Math.max(20, width - 28);
+  const writePct  = pct(written,  total);
+  const readPct   = pct(enqueued, total);
+  const writeFilled = Math.round((writePct / 100) * BAR_LEN);
+  const readFilled  = Math.round((readPct  / 100) * BAR_LEN);
+  const writeBar  = '█'.repeat(writeFilled) + '░'.repeat(BAR_LEN - writeFilled);
+  const readBar   = '█'.repeat(readFilled)  + '░'.repeat(BAR_LEN - readFilled);
 
-  const getEstimatedTimeRemaining = () => {
-    if (task.progress.processed === 0 || elapsed === 0) {
-      return 'Calculando...';
-    }
-    const rate = task.progress.processed / elapsed;
-    const remaining = task.progress.total - task.progress.processed;
-    const estimatedSeconds = Math.floor(remaining / rate);
-    return formatTime(estimatedSeconds);
-  };
+  const docsPerSec = elapsed > 0 ? Math.floor(written / elapsed) : 0;
+  const remaining  = total && written && elapsed > 0
+    ? fmtTime(Math.floor(((total - written) / (written / elapsed))))
+    : '...';
 
-  const getDocsPerSecond = () => {
-    if (elapsed === 0) {
-      return 0;
-    }
-    return Math.floor(task.progress.processed / elapsed);
-  };
-
-  const getStatusInfo = () => {
-    switch (task.status) {
-      case 'running': return { type: 'loading', message: 'Migração em andamento' };
-      case 'paused': return { type: 'warning', message: 'Migração pausada' };
-      case 'completed': return { type: 'success', message: 'Migração concluída' };
-      case 'failed': return { type: 'error', message: 'Migração falhou' };
-      case 'cancelled': return { type: 'warning', message: 'Migração cancelada' };
-      default: return { type: 'info', message: 'Status desconhecido' };
-    }
-  };
+  const statusColor = {
+    running:   yellow,
+    paused:    amber,
+    completed: green,
+    failed:    red,
+    cancelled: amber,
+  }[task.status] ?? yellow;
 
   return (
-    <Box flexDirection="column" padding={1}>
-      <GeminiHeader 
-        title={`Migração: ${task.indexName}`}
-        subtitle={task.controlField ? `Campo de controle: ${task.controlField}` : 'Sem campo de controle'}
-      />
+    <Box flexDirection="column" minHeight={rows}>
+      <AppHeader subtitle={`Monitorando: ${task.indexName}`} />
 
-      <GeminiBox title="Status" color={task.status === 'running' ? 'yellow' : task.status === 'failed' ? 'red' : 'yellow'}>
-        <Box flexDirection="column">
-          {task.status === 'running' && <GeminiSpinner text={getStatusInfo().message} />}
-          {task.status !== 'running' && <GeminiStatus status={getStatusInfo().type} message={getStatusInfo().message} />}
-          
-          {!task.controlField && (
-            <Box marginTop={1}>
-              <GeminiStatus status="warning" message="Sem campo de controle - migração sem checkpoints" />
-            </Box>
-          )}
-        </Box>
-      </GeminiBox>
+      <Box flexDirection="column" paddingX={3} flexGrow={1}>
 
-      <GeminiBox title="Progresso" color="yellow">
-        <Box flexDirection="column">
-          <GeminiProgress percentage={getProgressPercentage()} showPercentage={true} />
-          
-          <Box marginTop={1} flexDirection="column">
-            <Text>📊 Documentos: {geminiGradient(task.progress.processed.toLocaleString())} / {task.progress.total.toLocaleString()}</Text>
-            <Text>
-              {task.progress.failed > 0 ? '❌' : '✅'} Falhas: 
-              <Text color={task.progress.failed > 0 ? 'red' : 'green'}> {task.progress.failed}</Text>
-            </Text>
-            <Text>⚡ Taxa: {geminiGradient(getDocsPerSecond() + ' docs/s')}</Text>
+        {/* ── Connection info ──────────────────────────────────────────── */}
+        <Box gap={4} marginBottom={1}>
+          <Box>
+            <Text backgroundColor="yellow" color="black" bold> ← ORIGEM </Text>
+            <Text dimColor> {task.sourceConfig?.url ?? '—'}</Text>
+          </Box>
+          <Box>
+            <Text backgroundColor="green" color="black" bold> → DESTINO </Text>
+            <Text dimColor> {task.destConfig?.url ?? '—'}</Text>
           </Box>
         </Box>
-      </GeminiBox>
 
-      <GeminiBox title="Tempo" color="yellow">
-        <Box flexDirection="column">
-          <Text>⏱️  Decorrido: {geminiGradient(formatTime(elapsed))}</Text>
-          <Text>⏳ Estimado: {geminiGradient(getEstimatedTimeRemaining())}</Text>
+        <Text color="yellow" dimColor>{'─'.repeat(width - 6)}</Text>
+
+        {/* ── Status ───────────────────────────────────────────────────── */}
+        <Box marginTop={1} marginBottom={1} gap={2}>
+          <Text color="yellow" bold>Status</Text>
+          {task.status === 'running'
+            ? <GeminiSpinner text="Migrando documentos" />
+            : <Text>{statusColor((task.status || '').toUpperCase())}</Text>
+          }
+          {task.error && <Text color="red">  ✗ {task.error}</Text>}
         </Box>
-      </GeminiBox>
 
-      {task.error && (
-        <GeminiBox title="Erro" color="red">
-          <GeminiStatus status="error" message={task.error} />
-        </GeminiBox>
-      )}
+        {/* ── Write progress bar ────────────────────────────────────────── */}
+        <Box flexDirection="column" marginBottom={1}>
+          <Box gap={1}>
+            <Text dimColor bold>Escrita  </Text>
+            <Text>{yellow(writeBar)}</Text>
+            <Text> {statusColor(`${writePct}%`)}</Text>
+          </Box>
+          <Box marginLeft={9} gap={4}>
+            <Text>
+              <Text dimColor>Indexados  </Text>
+              {yellow(fmt(written))}
+              <Text dimColor> / {fmt(total)}</Text>
+            </Text>
+            <Text>
+              <Text dimColor>Falhas  </Text>
+              {failed > 0 ? <Text color="red">{fmt(failed)}</Text> : <Text color="green">0</Text>}
+            </Text>
+            <Text>
+              <Text dimColor>Taxa  </Text>
+              {yellow(`${docsPerSec} docs/s`)}
+            </Text>
+          </Box>
+        </Box>
 
-      <Box marginTop={1}>
-        {task.status === 'running' && (
-          <Text dimColor>{geminiGradient('P')} Pausar  {geminiGradient('C')} Cancelar  {geminiGradient('Q')} Fechar</Text>
+        {/* ── Read progress bar (shown when meaningfully different) ──── */}
+        {total > 0 && (
+          <Box flexDirection="column" marginBottom={1}>
+            <Box gap={1}>
+              <Text dimColor bold>Leitura  </Text>
+              <Text>{amber(readBar)}</Text>
+              <Text> {amber(`${readPct}%`)}</Text>
+              {readerDone && <Text color="green">  ✓ leitura concluída</Text>}
+            </Box>
+            <Box marginLeft={9} gap={4}>
+              <Text>
+                <Text dimColor>Enfileirados  </Text>
+                {amber(fmt(enqueued))}
+                <Text dimColor> / {fmt(total)}</Text>
+              </Text>
+              {pending > 0 && (
+                <Text>
+                  <Text dimColor>Batches pendentes  </Text>
+                  {amber(String(pending))}
+                </Text>
+              )}
+            </Box>
+          </Box>
         )}
-        {task.status === 'paused' && (
-          <Text dimColor>{geminiGradient('R')} Retomar  {geminiGradient('C')} Cancelar  {geminiGradient('Q')} Fechar</Text>
+
+        {/* ── Time ────────────────────────────────────────────────────── */}
+        <Box gap={6} marginBottom={1}>
+          <Text><Text dimColor>Decorrido  </Text>{yellow(fmtTime(elapsed))}</Text>
+          {task.status === 'running' && <Text><Text dimColor>Restante  </Text>{yellow(remaining)}</Text>}
+        </Box>
+
+        {/* ── Checkpoint info ──────────────────────────────────────────── */}
+        {task.controlField ? (
+          <Box>
+            <Text dimColor>
+              Checkpoint: campo <Text color="white">{task.controlField}</Text>
+              {task.progress?.lastControlValue != null &&
+                <Text>  →  última posição: <Text color="white">{String(task.progress.lastControlValue)}</Text></Text>
+              }
+            </Text>
+          </Box>
+        ) : (
+          <Box>
+            <Text color="yellow" dimColor>⚠  Sem campo de controle — checkpoint desativado</Text>
+          </Box>
         )}
-        {(task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') && (
-          <Text dimColor>{geminiGradient('Q')} Fechar</Text>
-        )}
+      </Box>
+
+      {/* ── Command bar ──────────────────────────────────────────────── */}
+      <Box flexDirection="column">
+        <Text color="yellow" dimColor>{'─'.repeat(width)}</Text>
+        <Box paddingX={2} gap={2}>
+          {task.status === 'running' && (
+            <>
+              <Text>{yellow('P')}<Text dimColor> pausar</Text></Text>
+              <Text>{yellow('C')}<Text dimColor> cancelar</Text></Text>
+            </>
+          )}
+          {task.status === 'paused' && (
+            <>
+              <Text>{yellow('R')}<Text dimColor> retomar</Text></Text>
+              <Text>{yellow('C')}<Text dimColor> cancelar</Text></Text>
+            </>
+          )}
+          <Text>{yellow('Q')}<Text dimColor> fechar</Text></Text>
+        </Box>
       </Box>
     </Box>
   );

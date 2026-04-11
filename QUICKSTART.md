@@ -1,170 +1,123 @@
-# Guia Rápido de Início
+# Quick Start
 
-## Início Rápido em 5 Minutos
+Get your first migration running in under 5 minutes.
 
-### 1. Pré-requisitos
-Certifique-se de ter instalado:
-- ✅ Node.js 18+
-- ✅ Redis
-- ✅ Elasticsearch 5.x (origem)
-- ✅ Elasticsearch 9.x (destino)
+---
 
-### 2. Instalação
+## Prerequisites
+
+- Node.js >= 18 installed
+- Redis running (`redis-cli ping` returns `PONG`)
+- Source ES 2/5/6 and destination ES 8/9 reachable from this machine
+
+---
+
+## Step 1 — Install
+
 ```bash
-cd /mnt/projetos/teste/migra-es
+git clone https://github.com/your-org/migra-es.git
+cd migra-es
 npm install
-```
-
-### 3. Configuração
-```bash
-# Copiar arquivo de exemplo
 cp .env.example .env
-
-# Editar com suas configurações
-nano .env
 ```
 
-Configuração mínima necessária:
-```bash
-ES_SOURCE_URL=http://localhost:9200
-ES_DEST_URL=http://localhost:9201
+Edit `.env` and set at minimum:
+
+```env
 REDIS_HOST=localhost
+REDIS_PORT=6379
 ```
 
-### 4. Iniciar Redis
-```bash
-# Verificar se Redis está rodando
-redis-cli ping
+---
 
-# Se não estiver, iniciar:
-sudo systemctl start redis-server
-```
+## Step 2 — Start
 
-### 5. Executar a Aplicação
 ```bash
 npm start
 ```
 
-### 6. Seguir o Wizard
-1. **Configurar Origem**
-   - Informe URL do Elasticsearch 5
-   - Configure autenticação (se necessário)
-   - Configure SSL (se necessário)
+The application initializes Redis and the job queues, then shows the dashboard.
 
-2. **Configurar Destino**
-   - Informe URL do Elasticsearch 9
-   - Configure autenticação (se necessário)
-   - Configure SSL (se necessário)
+---
 
-3. **Selecionar Índice**
-   - Escolha o índice a ser migrado
+## Step 3 — Start the migration wizard
 
-4. **Selecionar Campo de Controle**
-   - Escolha um campo numérico ou de data
-   - Recomendado: timestamp ou ID
+Press `N` on the dashboard.
 
-5. **Monitorar Progresso**
-   - Acompanhe a migração em tempo real
-   - Veja estatísticas e progresso
+---
 
-## Comandos Úteis
+## Step 4 — Configure connections
 
-### Durante a Migração
-- `P` - Pausar migração
-- `R` - Retomar migração
-- `C` - Cancelar migração
-- `Q` - Fechar monitor
+**If this is your first run** — choose `+ Nova Conexao` to create a connection profile:
 
-### Navegação
-- `↑↓` - Navegar em listas
-- `Enter` - Selecionar opção
-- `ESC` - Cancelar/Voltar
-- `Q` - Sair da aplicação
+1. Enter the **source** Elasticsearch URL (e.g. `http://es5-host:9200`)
+   - Add credentials if required
+2. Enter the **destination** Elasticsearch URL (e.g. `http://es9-host:9200`)
+   - Add credentials if required
+3. Both connections are tested automatically; the wizard won't proceed if either fails
+4. Optionally name and save the profile for future use (e.g. `staging`)
 
-## Verificação Rápida
+**On subsequent runs** — select the saved profile from the list.
 
-### Testar Conexões
-```bash
-# Elasticsearch Origem
-curl http://localhost:9200
+---
 
-# Elasticsearch Destino
-curl http://localhost:9201
+## Step 5 — Select an index
 
-# Redis
-redis-cli ping
-```
+The index selector has three columns:
 
-### Ver Logs
-```bash
-# Logs em tempo real
-tail -f logs/application-*.log
+| Column | Content | Navigation |
+|--------|---------|------------|
+| Left | All indices on the source cluster | `↑`/`↓` to move, `/` to search, `→` or `Enter` to select |
+| Middle | Sortable fields for the selected index | `↑`/`↓` to choose, `Enter` to confirm |
+| Right | Migration queue | `D` to remove, `S` to start |
 
-# Apenas erros
-tail -f logs/error-*.log
-```
+**Choose a control field** (recommended): a numeric or date field that is unique and always increasing (e.g. `id`, `created_at`). This enables checkpoint-based resume — if the migration is paused or interrupted, it continues from where it left off.
 
-## Exemplo Completo
+If the index has no suitable field, select `Sem campo de controle` at the bottom of the field list. The migration will still work, but a restart will re-read all documents.
 
-### Cenário: Migrar índice "products"
+Repeat for as many indices as you want to migrate in this session.
 
-1. **Iniciar**
-```bash
-npm start
-```
+---
 
-2. **Wizard**
-   - Origem: `http://localhost:9200` (sem auth, sem SSL)
-   - Destino: `http://localhost:9201` (sem auth, sem SSL)
-   - Índice: `products`
-   - Campo: `created_at`
+## Step 6 — Start
 
-3. **Aguardar**
-   - A migração inicia automaticamente
-   - Progresso é exibido em tempo real
-   - Pode fechar e reabrir a TUI sem perder progresso
+Press `S` in the queue column. One migration task is created per index.
 
-4. **Validar**
-```bash
-# Comparar contagem de documentos
-curl http://localhost:9200/products/_count
-curl http://localhost:9201/products/_count
-```
+---
 
-## Solução de Problemas Rápida
+## Step 7 — Monitor progress
 
-### Redis não conecta
-```bash
-sudo systemctl start redis-server
-```
+Back on the dashboard you will see each task with:
+- Status (`Em andamento`, `Pausada`, `Concluida`, `Falhou`)
+- Write progress bar
+- Read/enqueue progress bar (shown when the reader is ahead)
+- Doc counts and failure count
 
-### Elasticsearch não conecta
-```bash
-# Verificar se está rodando
-curl http://localhost:9200
-curl http://localhost:9201
-```
+Press `Enter` on any task for the detailed monitor screen.
 
-### Erro de permissão
-```bash
-chmod +x src/cli/index.js
-```
+---
 
-### Limpar dados antigos
-```bash
-rm -rf data/tasks.json logs/*.log
-```
+## Keyboard reference
 
-## Próximos Passos
+| Screen | Key | Action |
+|--------|-----|--------|
+| Dashboard | `N` | New migration wizard |
+| Dashboard | `↑`/`↓` | Navigate |
+| Dashboard | `Enter` | Open monitor |
+| Dashboard | `P` | Pause running task |
+| Dashboard | `R` | Resume paused task |
+| Dashboard | `C` | Cancel task |
+| Dashboard | `E` | Reprocess completed/failed task |
+| Dashboard | `Q` | Quit |
+| Monitor | `P`/`R`/`C` | Pause / Resume / Cancel |
+| Monitor | `Q` / `Esc` | Back to dashboard |
+| Wizard | `Esc` | Previous step / cancel |
+| Any screen | `Q` | Back or quit |
 
-- 📖 Leia [README.md](README.md) para documentação completa
-- 🔧 Veja [INSTALL.md](INSTALL.md) para instalação detalhada
-- 📝 Consulte [EXAMPLES.md](EXAMPLES.md) para mais exemplos
+---
 
-## Suporte
+## Next steps
 
-Problemas? Verifique:
-1. Logs em `logs/application-*.log`
-2. Redis está rodando: `redis-cli ping`
-3. Elasticsearch acessível: `curl http://localhost:9200`
-4. Versão do Node.js: `node --version` (deve ser 18+)
+- [EXAMPLES.md](EXAMPLES.md) — more detailed usage scenarios
+- [INSTALL.md](INSTALL.md) — full installation and configuration reference
+- [README.md](README.md) — architecture overview

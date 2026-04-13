@@ -1,269 +1,232 @@
 # migra-es
 
-**migra-es** is an open-source terminal application for migrating Elasticsearch indices from legacy versions (2.x / 5.x / 6.x) to modern Elasticsearch 8/9.
-
-It features a full-screen TUI (terminal user interface), a producer/consumer job queue backed by Redis, live progress monitoring, checkpoint-based resume, support for migrating multiple indices in a single session, and a fully internationalized interface (English / Portuguese).
+Terminal UI (TUI) para migração de índices do Elasticsearch 5 para o Elasticsearch 9, com análise de impacto assistida por IA.
 
 ---
 
-## Features
+## Visão geral
 
-- **Interactive TUI** — navigate with arrow keys; no config files needed for day-to-day use
-- **Connection profiles** — save source and destination server configurations for reuse
-- **Multi-index migration** — select and queue multiple indices in one wizard session
-- **Live dashboard** — real-time write and read progress bars, status, doc counts, and error counts
-- **Pause / Resume** — stop and continue a migration without losing progress (checkpoint via sortable control field)
-- **Cancel** — gracefully stops both the reader and any queued writer batches
-- **Reprocess** — delete the destination index and restart from zero, with a confirmation step
-- **Mapping conversion** — automatically converts ES 2/5/6 mappings to ES 9 (`string` → `text`/`keyword`, removes deprecated metadata fields)
-- **`source_type` field** — the ES 5/6 `_type` value is preserved as a `keyword` field in the destination
-- **Fault-tolerant queue** — Redis-backed Bull queues survive worker crashes; atomic counters track exact progress
-- **Structured logs** — Winston logger with daily rotation written to `~/.migra-es/logs/`
-- **Internationalized TUI** — English and Portuguese (auto-detected from OS locale, or set `MIGRA_ES_LANG`)
+**migra-es** é uma ferramenta de linha de comando interativa que automatiza a migração de índices entre versões incompatíveis do Elasticsearch. A migração entre ES5 e ES9 envolve mudanças profundas em mapeamentos, analyzers, configurações e APIs — o migra-es cuida de tudo isso com um fluxo guiado passo a passo.
+
+Quando configurado com um provedor de IA (Claude, OpenAI, Gemini ou endpoint compatível), o migra-es analisa cada índice antes de migrá-lo, gera um relatório de impacto detalhado e propõe mapeamentos, settings e analyzers otimizados para ES9. O usuário aprova ou rejeita cada proposta antes de qualquer dado ser movido.
 
 ---
 
-## Requirements
+## Funcionalidades
 
-| Dependency | Version |
-|---|---|
-| Node.js | >= 18 |
-| Redis | >= 6 (must be running before start) |
-| Source Elasticsearch | 2.x, 5.x, or 6.x |
-| Destination Elasticsearch | 8.x or 9.x |
+- **TUI interativa** — interface no terminal com navegação por teclado (construída com [Ink](https://github.com/vadimdemedes/ink))
+- **Migração com scroll + Bull queue** — usa scroll API do ES5 com processamento em fila Redis para alta resiliência
+- **Conversão automática de mapeamentos** — converte tipos ES5 (`string` → `text`/`keyword`) e remove campos obsoletos (`_all`, `_timestamp`, `include_in_all`)
+- **Conversão de analyzers** — adapta analyzers e token filters depreciados para equivalentes ES9
+- **Análise de impacto com IA** — pipeline de análise em duas fases por índice; relatórios gerados no idioma configurado (pt-BR ou English)
+- **Proposta revisável** — mapeamento, settings, analyzers, template e aliases gerados pela IA são exibidos para aprovação antes da execução
+- **Cache de breaking changes** — guia de mudanças entre versões gerado pela IA é persistido localmente para evitar chamadas redundantes
+- **Multi-provedor** — suporta Claude (Anthropic), OpenAI, Google Gemini e qualquer endpoint compatível com OpenAI
+- **Internacionalização** — interface e relatórios disponíveis em Português (pt-BR) e Inglês
 
 ---
 
-## Installation
+## Pré-requisitos
 
-### Global install (recommended)
+- Node.js >= 18
+- Redis rodando localmente (ou acessível via rede)
+- Elasticsearch 5.x (source) acessível
+- Elasticsearch 9.x (dest) acessível
+
+---
+
+## Instalação
 
 ```bash
-npm install -g migra-es
-migra-es
-```
-
-npm creates the command automatically:
-- **Linux / macOS** — symlink at `/usr/local/bin/migra-es`
-- **Windows** — wrapper script at `%APPDATA%\npm\migra-es.cmd`
-
-### From source
-
-```bash
-git clone https://github.com/your-org/migra-es.git
+git clone <repo>
 cd migra-es
 npm install
-npm start
+cp .env.example .env
 ```
 
-See [INSTALL.md](INSTALL.md) for detailed setup instructions and [QUICKSTART.md](QUICKSTART.md) for a step-by-step first-migration guide.
-
----
-
-## Configuration
-
-### Environment variables
-
-Set in `~/.migra-es/.env` (global install default) or a `.env` file in the current directory (takes precedence):
+Edite o `.env` com as configurações mínimas:
 
 ```env
-# Redis connection
-REDIS_HOST=localhost
+ES_SOURCE_URL=http://localhost:9200   # URL do ES5
+ES_DEST_URL=http://localhost:9201     # URL do ES9
+REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
-# REDIS_PASSWORD=
-
-# Default ES endpoints (optional — can also be set in the wizard)
-ES_SOURCE_URL=http://source-host:9200
-ES_DEST_URL=http://dest-host:9200
-
-# Migration tuning
-MIGRATION_BATCH_SIZE=1000
-MIGRATION_WORKER_THREADS=4
-MIGRATION_SCROLL_SIZE=5000
-MIGRATION_SCROLL_TIMEOUT=5m
-
-# Language override (auto-detected from OS locale if not set)
-# MIGRA_ES_LANG=en     # force English
-# MIGRA_ES_LANG=pt-BR  # force Portuguese
-```
-
-### Data and logs
-
-All state is stored under `~/.migra-es/`:
-
-```
-~/.migra-es/
-├── .env                    # optional global config
-├── data/
-│   └── tasks.json          # task history and saved connection profiles
-└── logs/
-    ├── application-YYYY-MM-DD.log
-    └── error-YYYY-MM-DD.log
 ```
 
 ---
 
-## Internationalization
-
-The TUI is fully internationalized. Language is auto-detected from the OS locale:
-
-| System locale | Language shown |
-|---|---|
-| `pt_BR.*`, `pt.*` | Portuguese (pt-BR) |
-| anything else | English |
-
-To override:
+## Uso
 
 ```bash
-MIGRA_ES_LANG=en migra-es        # force English
-MIGRA_ES_LANG=pt-BR migra-es     # force Portuguese
+# Iniciar a TUI
+npm start
+
+# Modo desenvolvimento (recarrega automaticamente)
+npm run dev
 ```
 
-To add a new language, create `src/i18n/locales/<locale>.json` following the structure of `en.json`, then add detection logic in `src/i18n/index.js`.
+### Navegação no dashboard (tela Home)
+
+| Tecla | Ação |
+|-------|------|
+| `N` | Nova migração (abre o wizard) |
+| `A` | Configurar provedor de IA |
+| `I` | Análise de impacto |
+| `B` | Cache de breaking changes |
+| `Enter` | Abrir tarefa selecionada |
+| `↑ / ↓` | Navegar na lista de tarefas |
 
 ---
 
-## Usage
-
-### Dashboard (home screen)
+## Fluxo de migração com análise de IA
 
 ```
- N  New Migration   •  2 active migrations
- ─────────────────────────────────────────────────────────────────
- Active
-
- ▶  orders  Running  ↳ created_at
-    Created: 11/04/2024 09:15
-    Write   ████████████░░░░░░░░░░░  52%    520,000 / 1,000,000 docs
-    Read    ████████████████░░░░░░░  68%    680,000 queued
-
- History
-
-    products  Completed
-    Created: 10/04/2024 14:00   Completed: 10/04/2024 16:32
-    45,000 / 45,000 docs
-
- ─────────────────────────────────────────────────────────────────
- ↑↓ navigate   Enter monitor   N new migration   Q quit
+Wizard
+  └─ Configuração source/dest
+  └─ Seleção de índice
+  └─ Campo de controle (cursor de checkpoint)
+  └─ Confirmação
+        │
+        ├─ [IA configurada] → Proposal Runner
+        │     └─ Análise por índice (streaming)
+        │     └─ Proposta: mapeamento + settings + analyzers + relatório
+        │
+        ├─ [IA configurada] → Proposal Review
+        │     └─ Aprovação ou rejeição por índice
+        │     └─ Drill-down em abas: Relatório / Mapeamento / Settings / Estratégia
+        │
+        └─ Migration Engine
+              └─ [com IA] usa artifacts da proposta aprovada
+              └─ [sem IA]  usa auto-conversores de mapeamento/analyzer
+              └─ Scroll source → Bulk index dest
 ```
-
-**Keyboard shortcuts:**
-
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate task list |
-| `Enter` | Open detailed monitor for focused task |
-| `N` | Start new migration wizard |
-| `P` | Pause focused running task |
-| `R` | Resume focused paused task |
-| `C` | Cancel focused running/paused task |
-| `E` | Reprocess focused completed/failed/cancelled task |
-| `Q` | Quit |
-
-### Migration wizard
-
-Press `N` to start. Steps:
-
-1. **Select connection** — saved profiles or new
-2. **Source** — URL, auth, TLS (with `← SOURCE` badge)
-3. **Destination** — URL, auth, TLS (with `→ DEST` badge)
-4. **Save profile** — optionally name the connection pair
-5. **Index selector** — three-column: index list / control field / migration queue
-
-### Monitor screen
-
-| Key | Action |
-|-----|--------|
-| `P` / `R` / `C` | Pause / Resume / Cancel |
-| `Q` / `Esc` | Back to dashboard |
 
 ---
 
-## Architecture
+## Como a IA analisa cada índice
+
+A análise de impacto ocorre em **duas fases** para cada índice, antes de qualquer dado ser movido.
+
+### Fase 1 — Breaking changes
+
+O módulo `breakingChangesMemory` verifica se já existe um guia de breaking changes ES5→ES9 em cache local (`~/.migra-es/breaking-changes-memory.json`). Se não existir, envia uma query ao modelo de IA pedindo uma lista estruturada de mudanças incompatíveis entre as versões. O resultado é salvo localmente e reutilizado em análises futuras — evitando chamadas desnecessárias à API.
+
+### Fase 2 — Proposta por índice
+
+Com o contexto de breaking changes em mãos, o módulo `migrationProposal` envia ao modelo:
+
+- O mapeamento atual do índice (ES5)
+- As settings atuais (analyzers, filtros, shards, réplicas)
+- O guia de breaking changes da fase 1
+- Uma instrução de idioma (`langInstruction()`) para que o relatório seja gerado no idioma configurado no app
+
+O modelo responde em **streaming** com uma proposta estruturada contendo:
+
+| Campo | Conteúdo |
+|-------|----------|
+| `mapping` | Mapeamento convertido para ES9 |
+| `settings` | Settings otimizadas para ES9 |
+| `analyzers` | Analyzers e token filters compatíveis |
+| `template` | Template de índice sugerido |
+| `aliases` | Aliases recomendados |
+| `report` | Relatório narrativo explicando cada decisão tomada |
+| `strategy` | Estratégia de migração (ex.: reindex, rollover, zero-downtime) |
+
+### Artifacts e aprovação
+
+Cada proposta é salva como um arquivo JSON em `~/.migra-es/indices/{indexName}/proposal.json`. O usuário revisa a proposta na tela **Proposal Review** — pode navegar pelas abas (Relatório / Mapeamento / Settings+Analyzers / Estratégia) e aprovar ou rejeitar cada índice individualmente.
+
+Somente os índices aprovados avançam para execução. Ao executar, o **Migration Engine** lê o artifact salvo e usa os dados da proposta para criar o índice destino. Se nenhum artifact existir (fluxo sem IA), usa os auto-conversores.
+
+---
+
+## Configuração do provedor de IA
+
+Acesse a tela **AI Config** (`A` no dashboard) ou configure diretamente em `~/.migra-es/ai-config.json`:
+
+```json
+{
+  "provider": "claude",
+  "model": "claude-sonnet-4-6",
+  "apiKey": "sk-ant-..."
+}
+```
+
+Provedores suportados:
+
+| Provider | Valor | Modelos recomendados |
+|----------|-------|----------------------|
+| Anthropic Claude | `claude` | `claude-sonnet-4-6`, `claude-opus-4-6` |
+| OpenAI | `openai` | `gpt-4o`, `gpt-4-turbo` |
+| Google Gemini | `gemini` | `gemini-1.5-pro` |
+| Custom (OpenAI-compat.) | `custom` | qualquer modelo local (Ollama, LM Studio, etc.) |
+
+Para provedores custom, inclua também `"baseUrl": "http://localhost:11434/v1"`.
+
+---
+
+## Arquivos e diretórios gerados
+
+| Caminho | Conteúdo |
+|---------|----------|
+| `data/tasks.json` | Estado persistido das tarefas de migração (LowDB) |
+| `logs/application-*.log` | Logs gerais da aplicação (Winston) |
+| `logs/error-*.log` | Logs de erros |
+| `~/.migra-es/ai-config.json` | Configuração do provedor de IA |
+| `~/.migra-es/breaking-changes-memory.json` | Cache de breaking changes gerado pela IA |
+| `~/.migra-es/indices/{nome}/proposal.json` | Proposta de migração por índice |
+
+---
+
+## Comandos úteis
+
+```bash
+# Ver logs em tempo real
+tail -f logs/application-*.log
+
+# Limpar estado das tarefas
+rm data/tasks.json
+
+# Verificar Redis
+redis-cli ping
+
+# Limpar cache de breaking changes
+rm ~/.migra-es/breaking-changes-memory.json
+
+# Limpar proposta de um índice específico
+rm ~/.migra-es/indices/meu-indice/proposal.json
+```
+
+---
+
+## Arquitetura resumida
 
 ```
 src/
 ├── cli/
-│   ├── index.jsx               # Root App — screen state machine
-│   ├── wizard.jsx              # Multi-step migration wizard
+│   ├── index.jsx                     # App root + state machine de telas
+│   ├── wizard.jsx                    # Wizard multi-step + roteamento IA
 │   └── components/
-│       ├── AppHeader.jsx
-│       ├── TaskList.jsx        # Dashboard with live task rows
-│       ├── ProgressMonitor.jsx # Detailed single-task monitor
-│       ├── ConnectionForm.jsx  # Source/destination form (role badges)
-│       ├── ConnectionSelector.jsx
-│       ├── MultiIndexSelector.jsx  # 3-column index + field + queue
-│       └── ConfirmDialog.jsx   # Destructive action confirmation
+│       ├── TaskList.jsx              # Dashboard / home
+│       ├── AIProviderSelector.jsx    # Configuração do provedor de IA
+│       ├── ImpactAnalysisView.jsx    # Análise de impacto (streaming)
+│       ├── BreakingChangesMemoryView # Gestão do cache de breaking changes
+│       ├── MigrationProposalRunner   # Análise sequencial por índice
+│       ├── MigrationProposalReview   # Aprovação/rejeição de propostas
+│       └── IndexProposalDetail       # Detalhe em abas de uma proposta
 ├── core/
-│   ├── elasticsearch/          # Client, index management, bulk ops
-│   ├── migration/              # Engine (reader + writer), mapping/analyzer converters
-│   ├── tasks/                  # Bull queue processors + task manager
-│   └── cache/                  # Redis client + mapping cache
-├── database/
-│   ├── db.js                   # LowDB → ~/.migra-es/data/tasks.json
-│   └── connections.js          # Connection profile CRUD
-├── i18n/
-│   ├── index.js                # t() / tp() / locale detection
-│   └── locales/
-│       ├── en.json
-│       └── pt-BR.json
-└── utils/
-    ├── config.js               # .env → typed config (APP_DIR = ~/.migra-es)
-    ├── logger.js               # Winston → ~/.migra-es/logs/
-    ├── validators.js
-    └── fieldUtils.js
+│   ├── ai/
+│   │   ├── aiConfig.js              # Leitura/escrita da config de IA
+│   │   ├── aiClient.js              # Factory de provedores
+│   │   ├── providers/               # claude, openai, gemini, custom
+│   │   ├── breakingChangesMemory.js # Cache persistente de breaking changes
+│   │   ├── impactAnalyzer.js        # Pipeline de análise em duas fases
+│   │   ├── indexArtifacts.js        # CRUD de artifacts por índice
+│   │   └── migrationProposal.js     # Geração da proposta com i18n
+│   ├── elasticsearch/               # Clients, indexManager, bulkOperations
+│   ├── migration/                   # mappingConverter, analyzerConverter, migrationEngine
+│   ├── tasks/                       # taskManager, queue (Bull)
+│   └── cache/                       # redisClient, cacheStrategy
+├── i18n/locales/                    # en.json, pt-BR.json
+└── utils/                           # config, logger, validators
 ```
-
-### Queue flow
-
-```
-Wizard → createMigrationTask → startMigrationTask
-                                      │
-                              [migration-reader queue]
-                              runReader
-                              ├─ scroll source ES in batches
-                              ├─ store batch in Redis (TTL 2h)
-                              ├─ INCR pending
-                              └─ enqueue writer job
-                                      │
-                              [migration-writer queue]  (concurrency N)
-                              runWriter
-                              ├─ read + delete batch from Redis
-                              ├─ bulkIndex to destination ES
-                              ├─ INCRBY written / failed
-                              └─ DECR pending → _checkCompletion
-```
-
----
-
-## Resetting state
-
-```bash
-# Remove all task history
-rm ~/.migra-es/data/tasks.json
-
-# Flush Redis migration keys
-redis-cli KEYS "migration:*" | xargs redis-cli DEL
-```
-
----
-
-## License
-
-MIT License — Copyright (c) 2024 **Rodrigo Tornis** — [Tornis Tecnologia](https://www.tornis.com.br)
-
-The copyright notice and permission notice must be preserved in all copies.
-See [LICENSE](LICENSE) for the full text.
-
----
-
-## Author
-
-**Rodrigo Tornis**
-[Tornis Tecnologia](https://www.tornis.com.br)
-
----
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

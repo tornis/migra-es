@@ -1,41 +1,43 @@
 # migra-es
 
-Terminal UI (TUI) para migração de índices do Elasticsearch 5 para o Elasticsearch 9, com análise de impacto assistida por IA.
+> Also available in: [Português (pt-BR)](./README.pt-BR.md)
+
+Terminal UI (TUI) for migrating indices from Elasticsearch 5 to Elasticsearch 9, with AI-powered impact analysis.
 
 ---
 
-## Visão geral
+## Overview
 
-**migra-es** é uma ferramenta de linha de comando interativa que automatiza a migração de índices entre versões incompatíveis do Elasticsearch. A migração entre ES5 e ES9 envolve mudanças profundas em mapeamentos, analyzers, configurações e APIs — o migra-es cuida de tudo isso com um fluxo guiado passo a passo.
+**migra-es** is an interactive command-line tool that automates index migration between incompatible Elasticsearch versions. Migrating from ES5 to ES9 involves deep breaking changes in mappings, analyzers, settings, and APIs — migra-es handles all of that through a guided step-by-step flow.
 
-Quando configurado com um provedor de IA (Claude, OpenAI, Gemini ou endpoint compatível), o migra-es analisa cada índice antes de migrá-lo, gera um relatório de impacto detalhado e propõe mapeamentos, settings e analyzers otimizados para ES9. O usuário aprova ou rejeita cada proposta antes de qualquer dado ser movido.
-
----
-
-## Funcionalidades
-
-- **TUI interativa** — interface no terminal com navegação por teclado (construída com [Ink](https://github.com/vadimdemedes/ink))
-- **Migração com scroll + Bull queue** — usa scroll API do ES5 com processamento em fila Redis para alta resiliência
-- **Conversão automática de mapeamentos** — converte tipos ES5 (`string` → `text`/`keyword`) e remove campos obsoletos (`_all`, `_timestamp`, `include_in_all`)
-- **Conversão de analyzers** — adapta analyzers e token filters depreciados para equivalentes ES9
-- **Análise de impacto com IA** — pipeline de análise em duas fases por índice; relatórios gerados no idioma configurado (pt-BR ou English)
-- **Proposta revisável** — mapeamento, settings, analyzers, template e aliases gerados pela IA são exibidos para aprovação antes da execução
-- **Cache de breaking changes** — guia de mudanças entre versões gerado pela IA é persistido localmente para evitar chamadas redundantes
-- **Multi-provedor** — suporta Claude (Anthropic), OpenAI, Google Gemini e qualquer endpoint compatível com OpenAI
-- **Internacionalização** — interface e relatórios disponíveis em Português (pt-BR) e Inglês
+When configured with an AI provider (Claude, OpenAI, Gemini, or a compatible endpoint), migra-es analyzes each index before migrating it, generates a detailed impact report, and proposes optimized mappings, settings, and analyzers for ES9. The user approves or rejects each proposal before any data is moved.
 
 ---
 
-## Pré-requisitos
+## Features
+
+- **Interactive TUI** — keyboard-navigable terminal interface built with [Ink](https://github.com/vadimdemedes/ink)
+- **Scroll + Bull queue migration** — uses the ES5 scroll API with Redis-backed queue processing for high resilience
+- **Automatic mapping conversion** — converts ES5 types (`string` → `text`/`keyword`) and removes obsolete fields (`_all`, `_timestamp`, `include_in_all`)
+- **Analyzer conversion** — adapts deprecated analyzers and token filters to ES9 equivalents
+- **AI-powered impact analysis** — two-phase analysis pipeline per index; reports generated in the configured language (pt-BR or English)
+- **Reviewable proposals** — AI-generated mapping, settings, analyzers, template, and aliases are presented for approval before execution
+- **Breaking changes cache** — AI-generated ES5→ES9 breaking changes guide is persisted locally to avoid redundant API calls
+- **Multi-provider** — supports Claude (Anthropic), OpenAI, Google Gemini, and any OpenAI-compatible endpoint
+- **Internationalization** — UI and AI reports available in Portuguese (pt-BR) and English
+
+---
+
+## Prerequisites
 
 - Node.js >= 18
-- Redis rodando localmente (ou acessível via rede)
-- Elasticsearch 5.x (source) acessível
-- Elasticsearch 9.x (dest) acessível
+- Redis running locally (or accessible over the network)
+- Elasticsearch 5.x (source) reachable
+- Elasticsearch 9.x (destination) reachable
 
 ---
 
-## Instalação
+## Installation
 
 ```bash
 git clone <repo>
@@ -44,105 +46,105 @@ npm install
 cp .env.example .env
 ```
 
-Edite o `.env` com as configurações mínimas:
+Edit `.env` with the minimum required settings:
 
 ```env
-ES_SOURCE_URL=http://localhost:9200   # URL do ES5
-ES_DEST_URL=http://localhost:9201     # URL do ES9
+ES_SOURCE_URL=http://localhost:9200   # ES5 URL
+ES_DEST_URL=http://localhost:9201     # ES9 URL
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 ```
 
 ---
 
-## Uso
+## Usage
 
 ```bash
-# Iniciar a TUI
+# Start the TUI
 npm start
 
-# Modo desenvolvimento (recarrega automaticamente)
+# Development mode (auto-reloads on file changes)
 npm run dev
 ```
 
-### Navegação no dashboard (tela Home)
+### Dashboard keyboard shortcuts (Home screen)
 
-| Tecla | Ação |
-|-------|------|
-| `N` | Nova migração (abre o wizard) |
-| `A` | Configurar provedor de IA |
-| `I` | Análise de impacto |
-| `B` | Cache de breaking changes |
-| `Enter` | Abrir tarefa selecionada |
-| `↑ / ↓` | Navegar na lista de tarefas |
+| Key | Action |
+|-----|--------|
+| `N` | New migration (opens the wizard) |
+| `A` | Configure AI provider |
+| `I` | Impact analysis |
+| `B` | Breaking changes cache |
+| `Enter` | Open selected task |
+| `↑ / ↓` | Navigate task list |
 
 ---
 
-## Fluxo de migração com análise de IA
+## Migration flow with AI analysis
 
 ```
 Wizard
-  └─ Configuração source/dest
-  └─ Seleção de índice
-  └─ Campo de controle (cursor de checkpoint)
-  └─ Confirmação
+  └─ Source / destination configuration
+  └─ Index selection
+  └─ Control field (scroll checkpoint cursor)
+  └─ Confirmation
         │
-        ├─ [IA configurada] → Proposal Runner
-        │     └─ Análise por índice (streaming)
-        │     └─ Proposta: mapeamento + settings + analyzers + relatório
+        ├─ [AI configured] → Proposal Runner
+        │     └─ Per-index analysis (streaming)
+        │     └─ Proposal: mapping + settings + analyzers + report
         │
-        ├─ [IA configurada] → Proposal Review
-        │     └─ Aprovação ou rejeição por índice
-        │     └─ Drill-down em abas: Relatório / Mapeamento / Settings / Estratégia
+        ├─ [AI configured] → Proposal Review
+        │     └─ Approve or reject per index
+        │     └─ Drill-down tabs: Report / Mapping / Settings / Strategy
         │
         └─ Migration Engine
-              └─ [com IA] usa artifacts da proposta aprovada
-              └─ [sem IA]  usa auto-conversores de mapeamento/analyzer
-              └─ Scroll source → Bulk index dest
+              └─ [with AI]    uses artifacts from the approved proposal
+              └─ [without AI] uses auto-converters for mapping/analyzers
+              └─ Scroll source → Bulk index destination
 ```
 
 ---
 
-## Como a IA analisa cada índice
+## How the AI analyzes each index
 
-A análise de impacto ocorre em **duas fases** para cada índice, antes de qualquer dado ser movido.
+Impact analysis happens in **two phases** per index, before any data is moved.
 
-### Fase 1 — Breaking changes
+### Phase 1 — Breaking changes
 
-O módulo `breakingChangesMemory` verifica se já existe um guia de breaking changes ES5→ES9 em cache local (`~/.migra-es/breaking-changes-memory.json`). Se não existir, envia uma query ao modelo de IA pedindo uma lista estruturada de mudanças incompatíveis entre as versões. O resultado é salvo localmente e reutilizado em análises futuras — evitando chamadas desnecessárias à API.
+The `breakingChangesMemory` module checks whether a cached ES5→ES9 breaking changes guide already exists locally at `~/.migra-es/breaking-changes-memory.json`. If not, it queries the AI model for a structured list of incompatible changes between the two versions. The result is saved locally and reused in future analyses — avoiding unnecessary API calls.
 
-### Fase 2 — Proposta por índice
+### Phase 2 — Per-index proposal
 
-Com o contexto de breaking changes em mãos, o módulo `migrationProposal` envia ao modelo:
+With the breaking changes context in hand, the `migrationProposal` module sends the AI model:
 
-- O mapeamento atual do índice (ES5)
-- As settings atuais (analyzers, filtros, shards, réplicas)
-- O guia de breaking changes da fase 1
-- Uma instrução de idioma (`langInstruction()`) para que o relatório seja gerado no idioma configurado no app
+- The current index mapping (ES5)
+- The current settings (analyzers, filters, shards, replicas)
+- The breaking changes guide from Phase 1
+- A language instruction (`langInstruction()`) so the report is generated in the app's configured language
 
-O modelo responde em **streaming** com uma proposta estruturada contendo:
+The model responds via **streaming** with a structured proposal containing:
 
-| Campo | Conteúdo |
-|-------|----------|
-| `mapping` | Mapeamento convertido para ES9 |
-| `settings` | Settings otimizadas para ES9 |
-| `analyzers` | Analyzers e token filters compatíveis |
-| `template` | Template de índice sugerido |
-| `aliases` | Aliases recomendados |
-| `report` | Relatório narrativo explicando cada decisão tomada |
-| `strategy` | Estratégia de migração (ex.: reindex, rollover, zero-downtime) |
+| Field | Content |
+|-------|---------|
+| `mapping` | Converted mapping for ES9 |
+| `settings` | Settings optimized for ES9 |
+| `analyzers` | Compatible analyzers and token filters |
+| `template` | Suggested index template |
+| `aliases` | Recommended aliases |
+| `report` | Narrative report explaining each decision made |
+| `strategy` | Migration strategy (e.g. reindex, rollover, zero-downtime) |
 
-### Artifacts e aprovação
+### Artifacts and approval
 
-Cada proposta é salva como um arquivo JSON em `~/.migra-es/indices/{indexName}/proposal.json`. O usuário revisa a proposta na tela **Proposal Review** — pode navegar pelas abas (Relatório / Mapeamento / Settings+Analyzers / Estratégia) e aprovar ou rejeitar cada índice individualmente.
+Each proposal is saved as a JSON file at `~/.migra-es/indices/{indexName}/proposal.json`. The user reviews the proposal in the **Proposal Review** screen — browsing tabs (Report / Mapping / Settings+Analyzers / Strategy) and approving or rejecting each index individually.
 
-Somente os índices aprovados avançam para execução. Ao executar, o **Migration Engine** lê o artifact salvo e usa os dados da proposta para criar o índice destino. Se nenhum artifact existir (fluxo sem IA), usa os auto-conversores.
+Only approved indices proceed to execution. When executing, the **Migration Engine** reads the saved artifact and uses the proposal data to create the destination index. If no artifact exists (flow without AI), the auto-converters are used instead.
 
 ---
 
-## Configuração do provedor de IA
+## AI provider configuration
 
-Acesse a tela **AI Config** (`A` no dashboard) ou configure diretamente em `~/.migra-es/ai-config.json`:
+Open the **AI Config** screen (`A` on the dashboard) or configure directly in `~/.migra-es/ai-config.json`:
 
 ```json
 {
@@ -152,77 +154,77 @@ Acesse a tela **AI Config** (`A` no dashboard) ou configure diretamente em `~/.m
 }
 ```
 
-Provedores suportados:
+Supported providers:
 
-| Provider | Valor | Modelos recomendados |
-|----------|-------|----------------------|
+| Provider | Value | Recommended models |
+|----------|-------|--------------------|
 | Anthropic Claude | `claude` | `claude-sonnet-4-6`, `claude-opus-4-6` |
 | OpenAI | `openai` | `gpt-4o`, `gpt-4-turbo` |
 | Google Gemini | `gemini` | `gemini-1.5-pro` |
-| Custom (OpenAI-compat.) | `custom` | qualquer modelo local (Ollama, LM Studio, etc.) |
+| Custom (OpenAI-compat.) | `custom` | any local model (Ollama, LM Studio, etc.) |
 
-Para provedores custom, inclua também `"baseUrl": "http://localhost:11434/v1"`.
-
----
-
-## Arquivos e diretórios gerados
-
-| Caminho | Conteúdo |
-|---------|----------|
-| `data/tasks.json` | Estado persistido das tarefas de migração (LowDB) |
-| `logs/application-*.log` | Logs gerais da aplicação (Winston) |
-| `logs/error-*.log` | Logs de erros |
-| `~/.migra-es/ai-config.json` | Configuração do provedor de IA |
-| `~/.migra-es/breaking-changes-memory.json` | Cache de breaking changes gerado pela IA |
-| `~/.migra-es/indices/{nome}/proposal.json` | Proposta de migração por índice |
+For custom providers, also include `"baseUrl": "http://localhost:11434/v1"`.
 
 ---
 
-## Comandos úteis
+## Generated files and directories
+
+| Path | Contents |
+|------|----------|
+| `data/tasks.json` | Persisted migration task state (LowDB) |
+| `logs/application-*.log` | General application logs (Winston) |
+| `logs/error-*.log` | Error logs |
+| `~/.migra-es/ai-config.json` | AI provider configuration |
+| `~/.migra-es/breaking-changes-memory.json` | AI-generated breaking changes cache |
+| `~/.migra-es/indices/{name}/proposal.json` | Migration proposal per index |
+
+---
+
+## Useful commands
 
 ```bash
-# Ver logs em tempo real
+# Stream logs in real time
 tail -f logs/application-*.log
 
-# Limpar estado das tarefas
+# Reset task state
 rm data/tasks.json
 
-# Verificar Redis
+# Check Redis
 redis-cli ping
 
-# Limpar cache de breaking changes
+# Clear breaking changes cache
 rm ~/.migra-es/breaking-changes-memory.json
 
-# Limpar proposta de um índice específico
-rm ~/.migra-es/indices/meu-indice/proposal.json
+# Clear proposal for a specific index
+rm ~/.migra-es/indices/my-index/proposal.json
 ```
 
 ---
 
-## Arquitetura resumida
+## Architecture overview
 
 ```
 src/
 ├── cli/
-│   ├── index.jsx                     # App root + state machine de telas
-│   ├── wizard.jsx                    # Wizard multi-step + roteamento IA
+│   ├── index.jsx                     # App root + screen state machine
+│   ├── wizard.jsx                    # Multi-step wizard + AI routing
 │   └── components/
-│       ├── TaskList.jsx              # Dashboard / home
-│       ├── AIProviderSelector.jsx    # Configuração do provedor de IA
-│       ├── ImpactAnalysisView.jsx    # Análise de impacto (streaming)
-│       ├── BreakingChangesMemoryView # Gestão do cache de breaking changes
-│       ├── MigrationProposalRunner   # Análise sequencial por índice
-│       ├── MigrationProposalReview   # Aprovação/rejeição de propostas
-│       └── IndexProposalDetail       # Detalhe em abas de uma proposta
+│       ├── TaskList.jsx              # Dashboard / home screen
+│       ├── AIProviderSelector.jsx    # AI provider configuration
+│       ├── ImpactAnalysisView.jsx    # Impact analysis (streaming)
+│       ├── BreakingChangesMemoryView # Breaking changes cache management
+│       ├── MigrationProposalRunner   # Sequential per-index analysis runner
+│       ├── MigrationProposalReview   # Proposal approve/reject workflow
+│       └── IndexProposalDetail       # Tabbed proposal detail viewer
 ├── core/
 │   ├── ai/
-│   │   ├── aiConfig.js              # Leitura/escrita da config de IA
-│   │   ├── aiClient.js              # Factory de provedores
+│   │   ├── aiConfig.js              # AI config read/write
+│   │   ├── aiClient.js              # Provider factory
 │   │   ├── providers/               # claude, openai, gemini, custom
-│   │   ├── breakingChangesMemory.js # Cache persistente de breaking changes
-│   │   ├── impactAnalyzer.js        # Pipeline de análise em duas fases
-│   │   ├── indexArtifacts.js        # CRUD de artifacts por índice
-│   │   └── migrationProposal.js     # Geração da proposta com i18n
+│   │   ├── breakingChangesMemory.js # Persistent breaking changes cache
+│   │   ├── impactAnalyzer.js        # Two-phase analysis pipeline
+│   │   ├── indexArtifacts.js        # Per-index artifact CRUD
+│   │   └── migrationProposal.js     # Proposal generation with i18n
 │   ├── elasticsearch/               # Clients, indexManager, bulkOperations
 │   ├── migration/                   # mappingConverter, analyzerConverter, migrationEngine
 │   ├── tasks/                       # taskManager, queue (Bull)

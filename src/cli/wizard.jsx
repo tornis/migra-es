@@ -8,10 +8,13 @@ import ConnectionSelector from './components/ConnectionSelector.jsx';
 import MultiIndexSelector from './components/MultiIndexSelector.jsx';
 import AppHeader from './components/AppHeader.jsx';
 import GeminiSpinner from './components/GeminiSpinner.jsx';
+import MigrationProposalRunner from './components/MigrationProposalRunner.jsx';
+import MigrationProposalReview from './components/MigrationProposalReview.jsx';
 import { createElasticsearchClient, testConnection } from '../core/elasticsearch/client.js';
 import { listIndices, getIndexMapping } from '../core/elasticsearch/indexManager.js';
 import { getAllConnections, saveConnection } from '../database/connections.js';
 import { extractSortableFields } from '../utils/fieldUtils.js';
+import { isAIConfigured } from '../core/ai/aiConfig.js';
 import { createLogger } from '../utils/logger.js';
 import { t } from '../i18n/index.js';
 
@@ -35,15 +38,17 @@ const TEXT_INPUT_STEPS = new Set(['save-connection']);
  * @param {Function} props.onCancel
  */
 export default function MigrationWizard({ onComplete, onCancel }) {
-  const [step,           setStep]           = useState('loading-connections');
-  const [connections,    setConnections]    = useState([]);
-  const [sourceConfig,   setSourceConfig]   = useState(null);
-  const [destConfig,     setDestConfig]     = useState(null);
-  const [connectionName, setConnectionName] = useState('');
-  const [indices,        setIndices]        = useState([]);
-  const [loading,        setLoading]        = useState(false);
-  const [loadingText,    setLoadingText]    = useState(t('wizard.loading'));
-  const [error,          setError]          = useState(null);
+  const [step,            setStep]           = useState('loading-connections');
+  const [connections,     setConnections]    = useState([]);
+  const [sourceConfig,    setSourceConfig]   = useState(null);
+  const [destConfig,      setDestConfig]     = useState(null);
+  const [connectionName,  setConnectionName] = useState('');
+  const [indices,         setIndices]        = useState([]);
+  const [loading,         setLoading]        = useState(false);
+  const [loadingText,     setLoadingText]    = useState(t('wizard.loading'));
+  const [error,           setError]          = useState(null);
+  const [migrationQueue,  setMigrationQueue] = useState([]);   // [{indexName, controlField}]
+  const [proposalResults, setProposalResults] = useState([]); // after runner
 
   const { stdout } = useStdout();
   const rows  = stdout?.rows    ?? 24;
@@ -235,13 +240,38 @@ export default function MigrationWizard({ onComplete, onCancel }) {
 
   // ─── Multi-index confirmation ─────────────────────────────────────────────
 
-  const handleConfirmMigrations = (queue) => {
-    const configs = queue.map(item => ({
-      name: `Migration: ${item.indexName}`,
+  const buildConfigs = (queue) =>
+    queue.map(item => ({
+      name:         `Migration: ${item.indexName}`,
       sourceConfig,
       destConfig,
-      indexName: item.indexName,
+      indexName:    item.indexName,
       controlField: item.controlField,
+    }));
+
+  const handleConfirmMigrations = (queue) => {
+    if (!isAIConfigured()) {
+      logger.info('AI not configured, skipping impact analysis', { count: queue.length });
+      onComplete(buildConfigs(queue));
+      return;
+    }
+    setMigrationQueue(queue);
+    setStep('proposal-runner');
+  };
+
+  const handleProposalRunnerComplete = (results) => {
+    setProposalResults(results);
+    setStep('proposal-review');
+  };
+
+  const handleProposalReviewConfirm = (approved) => {
+    const configs = approved.map(item => ({
+      name:         `Migration: ${item.indexName}`,
+      sourceConfig,
+      destConfig,
+      indexName:    item.indexName,
+      controlField: item.controlField,
+      proposal:     item.proposal,
     }));
     onComplete(configs);
   };
@@ -390,6 +420,28 @@ export default function MigrationWizard({ onComplete, onCancel }) {
         indices={indices.map(idx => idx.name)}
         onLoadFields={handleLoadFields}
         onConfirm={handleConfirmMigrations}
+        onCancel={onCancel}
+      />
+    );
+  }
+
+  if (step === 'proposal-runner') {
+    return (
+      <MigrationProposalRunner
+        queue={migrationQueue}
+        sourceConfig={sourceConfig}
+        destConfig={destConfig}
+        onComplete={handleProposalRunnerComplete}
+        onCancel={onCancel}
+      />
+    );
+  }
+
+  if (step === 'proposal-review') {
+    return (
+      <MigrationProposalReview
+        results={proposalResults}
+        onConfirm={handleProposalReviewConfirm}
         onCancel={onCancel}
       />
     );

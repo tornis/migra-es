@@ -143,11 +143,14 @@ function TaskRow({ task, focused, barLen }) {
 
 /**
  * @param {object}   props
- * @param {Array}    props.tasks    - All task objects (enriched with Redis counters)
- * @param {Function} props.onSelect - Called with a task object to open monitor
- * @param {Function} props.onNew    - Called to start the migration wizard
+ * @param {Array}    props.tasks       - All task objects (enriched with Redis counters)
+ * @param {Function} props.onSelect    - Called with a task object to open monitor
+ * @param {Function} props.onNew       - Called to start the migration wizard
+ * @param {Function} props.onImpact    - Called with a task to run impact analysis
+ * @param {Function} props.onAIConfig  - Called to open AI provider settings
+ * @param {Function} props.onMemory    - Called to open breaking changes memory view
  */
-export default function TaskList({ tasks, onSelect, onNew }) {
+export default function TaskList({ tasks, onSelect, onNew, onImpact, onAIConfig, onMemory }) {
   const { stdout } = useStdout();
   const totalWidth = stdout?.columns ?? 80;
   const rows       = stdout?.rows    ?? 24;
@@ -187,6 +190,21 @@ export default function TaskList({ tasks, onSelect, onNew }) {
     }
     if (focused && (input === 'e' || input === 'E') && ['completed','failed','cancelled'].includes(focused.status)) {
       onSelect({ ...focused, _action: 'reprocess' });
+    }
+
+    // Impact analysis for focused task
+    if ((input === 'i' || input === 'I') && focused && onImpact) {
+      onImpact(focused);
+    }
+
+    // AI provider settings
+    if ((input === 'a' || input === 'A') && onAIConfig) {
+      onAIConfig();
+    }
+
+    // Breaking changes memory
+    if ((input === 'm' || input === 'M') && onMemory) {
+      onMemory();
     }
   });
 
@@ -271,6 +289,11 @@ export default function TaskList({ tasks, onSelect, onNew }) {
           {['completed','failed','cancelled'].includes(allRows[cursor]?.status) && (
             <Text>{yellow('E')}<Text dimColor>{t('keys.reprocess')}</Text></Text>
           )}
+          {allRows[cursor] && (
+            <Text>{yellow('I')}<Text dimColor>{t('ai.key_impact')}</Text></Text>
+          )}
+          <Text>{yellow('A')}<Text dimColor>{t('ai.key_ai_config')}</Text></Text>
+          <Text>{yellow('M')}<Text dimColor>{t('ai.key_memory')}</Text></Text>
           <Text>{yellow('Q')}<Text dimColor>{t('keys.quit')}</Text></Text>
         </Box>
       </Box>

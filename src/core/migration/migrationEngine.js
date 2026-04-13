@@ -11,6 +11,7 @@ import {
   cacheMapping, cacheSettings,
   getCachedMapping, getCachedSettings,
 } from '../cache/cacheStrategy.js';
+import { loadProposal } from '../ai/indexArtifacts.js';
 import { updateTaskProgress } from '../../database/db.js';
 import { getRedisClient } from '../cache/redisClient.js';
 import { getWriterQueue } from '../tasks/taskManager.js';
@@ -63,12 +64,64 @@ export async function runReader(jobData, onProgress) {
       await cacheSettings(indexName, sourceSettings);
     }
 
-    const es9Mapping  = convertMapping(sourceMapping);
-    const es9Settings = convertSettings(sourceSettings);
+    // ── Choose mapping/settings source: AI proposal vs auto-converter ────────
+
+    const aiProposal = loadProposal(indexName);
+    let finalMapping, finalSettings;
+
+    if (aiProposal?.proposedMapping && Object.keys(aiProposal.proposedMapping).length > 0) {
+      logger.info('Using AI-generated mapping for destination index', { indexName });
+      finalMapping  = aiProposal.proposedMapping;
+      finalSettings = aiProposal.proposedSettings ?? {};
+
+      // Merge custom analyzers into settings.index.analysis if provided separately
+      if (aiProposal.proposedAnalyzers && Object.keys(aiProposal.proposedAnalyzers).length > 0) {
+        finalSettings = {
+          ...finalSettings,
+          index: {
+            ...(finalSettings.index ?? {}),
+            analysis: {
+              ...(finalSettings.index?.analysis ?? {}),
+              ...aiProposal.proposedAnalyzers,
+            },
+          },
+        };
+      }
+    } else {
+      logger.info('No AI proposal found, using auto-converter', { indexName });
+      finalMapping  = convertMapping(sourceMapping);
+      finalSettings = convertSettings(sourceSettings);
+    }
 
     if (!await indexExists(destClient, indexName)) {
       logger.info('Creating destination index', { indexName });
-      await createIndex(destClient, indexName, es9Mapping, es9Settings);
+      await createIndex(destClient, indexName, finalMapping, finalSettings);
+
+      // Apply index template if proposed
+      if (aiProposal?.proposedTemplate && Object.keys(aiProposal.proposedTemplate).length > 0) {
+        try {
+          await destClient.indices.putTemplate({
+            name: `${indexName}-template`,
+            body: aiProposal.proposedTemplate,
+          });
+          logger.info('Index template applied', { indexName });
+        } catch (tplErr) {
+          logger.warn('Failed to apply index template', { indexName, error: tplErr.message });
+        }
+      }
+
+      // Create aliases if proposed
+      if (aiProposal?.proposedAliases?.length > 0) {
+        try {
+          const actions = aiProposal.proposedAliases.map(alias => ({
+            add: { index: indexName, alias },
+          }));
+          await destClient.indices.updateAliases({ body: { actions } });
+          logger.info('Aliases created', { indexName, aliases: aiProposal.proposedAliases });
+        } catch (aliasErr) {
+          logger.warn('Failed to create aliases', { indexName, error: aliasErr.message });
+        }
+      }
     } else {
       logger.warn('Destination index already exists, appending', { indexName });
     }

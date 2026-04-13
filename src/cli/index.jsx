@@ -19,7 +19,11 @@ import MigrationWizard from './wizard.jsx';
 import ProgressMonitor from './components/ProgressMonitor.jsx';
 import ConfirmDialog from './components/ConfirmDialog.jsx';
 import AppHeader from './components/AppHeader.jsx';
+import AIProviderSelector from './components/AIProviderSelector.jsx';
+import ImpactAnalysisView from './components/ImpactAnalysisView.jsx';
+import BreakingChangesMemoryView from './components/BreakingChangesMemoryView.jsx';
 import { t } from '../i18n/index.js';
+import { isAIConfigured } from '../core/ai/aiConfig.js';
 
 const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
 
@@ -32,6 +36,8 @@ function App() {
   const [tasks,           setTasks]           = useState([]);
   const [selectedTask,    setSelectedTask]    = useState(null);
   const [reprocessTarget, setReprocessTarget] = useState(null);
+  const [impactTask,      setImpactTask]      = useState(null);
+  const [aiConfigNext,    setAIConfigNext]    = useState(null);  // screen to go after AI config
   const [error,           setError]           = useState(null);
 
   const { exit }   = useApp();
@@ -78,6 +84,12 @@ function App() {
         setSelectedTask(null);
       } else if (screen === 'wizard') {
         setScreen('home');
+      } else if (screen === 'ai-config') {
+        setScreen('home'); setAIConfigNext(null);
+      } else if (screen === 'impact-analysis') {
+        setScreen('home'); setImpactTask(null);
+      } else if (screen === 'breaking-changes-memory') {
+        setScreen('home');
       } else {
         setScreen('home');
       }
@@ -85,9 +97,12 @@ function App() {
     }
 
     if (key.escape) {
-      if (screen === 'wizard')             setScreen('home');
-      if (screen === 'monitor')            { setScreen('home'); setSelectedTask(null); }
-      if (screen === 'confirm-reprocess')  handleReprocessCancel();
+      if (screen === 'wizard')              setScreen('home');
+      if (screen === 'monitor')             { setScreen('home'); setSelectedTask(null); }
+      if (screen === 'confirm-reprocess')   handleReprocessCancel();
+      if (screen === 'ai-config')           { setScreen('home'); setAIConfigNext(null); }
+      if (screen === 'impact-analysis')     { setScreen('home'); setImpactTask(null); }
+      if (screen === 'breaking-changes-memory') setScreen('home');
       return;
     }
 
@@ -163,6 +178,35 @@ function App() {
   };
 
   const handleWizardCancel = () => {
+    setScreen('home');
+  };
+
+  // ── Impact Analysis ──────────────────────────────────────────────────────────
+
+  const handleImpactAnalysis = (task) => {
+    setImpactTask(task);
+    if (!isAIConfigured()) {
+      // Go to AI config first, then come back to impact analysis
+      setAIConfigNext('impact-analysis');
+      setScreen('ai-config');
+    } else {
+      setScreen('impact-analysis');
+    }
+  };
+
+  const handleAIConfig = () => {
+    setAIConfigNext('home');
+    setScreen('ai-config');
+  };
+
+  const handleAIConfigSave = () => {
+    const next = aiConfigNext ?? 'home';
+    setAIConfigNext(null);
+    setScreen(next);
+  };
+
+  const handleAIConfigCancel = () => {
+    setAIConfigNext(null);
     setScreen('home');
   };
 
@@ -286,6 +330,35 @@ function App() {
         tasks={tasks}
         onSelect={handleTaskSelect}
         onNew={handleNewMigration}
+        onImpact={handleImpactAnalysis}
+        onAIConfig={handleAIConfig}
+        onMemory={() => setScreen('breaking-changes-memory')}
+      />
+    );
+  }
+
+  if (screen === 'ai-config') {
+    return (
+      <AIProviderSelector
+        onSave={handleAIConfigSave}
+        onCancel={handleAIConfigCancel}
+      />
+    );
+  }
+
+  if (screen === 'impact-analysis' && impactTask) {
+    return (
+      <ImpactAnalysisView
+        task={impactTask}
+        onBack={() => { setScreen('home'); setImpactTask(null); }}
+      />
+    );
+  }
+
+  if (screen === 'breaking-changes-memory') {
+    return (
+      <BreakingChangesMemoryView
+        onBack={() => setScreen('home')}
       />
     );
   }

@@ -6,6 +6,7 @@ import { generateMigrationProposal } from '../../core/ai/migrationProposal.js';
 import { proposalExists, loadProposal, saveProposal } from '../../core/ai/indexArtifacts.js';
 import { createElasticsearchClient } from '../../core/elasticsearch/client.js';
 import { getIndexMapping, getIndexSettings } from '../../core/elasticsearch/indexManager.js';
+import { formatEngineLabel, isCrossSolution } from '../../core/elasticsearch/engineDetector.js';
 import { t } from '../../i18n/index.js';
 
 const yellow = gradient(['#FFD700', '#FFA500', '#FFEC00', '#FFD700']);
@@ -105,20 +106,29 @@ export default function MigrationProposalRunner({
   const runAll = async () => {
     let srcClient  = null;
     let destClient = null;
-    let srcVersion = 5;
-    let destVersion = 9;
+
+    // Prefer pre-detected engine info from config (set by wizard after detectEngine())
+    const srcEngine  = sourceConfig.engine        ?? 'elasticsearch';
+    const destEngine = destConfig.engine          ?? 'elasticsearch';
+    let srcVersion   = parseInt(sourceConfig.engineVersion?.split('.')[0] ?? '5', 10);
+    let destVersion  = parseInt(destConfig.engineVersion?.split('.')[0]   ?? '9', 10);
 
     try {
       srcClient  = await createElasticsearchClient(sourceConfig);
       destClient = await createElasticsearchClient(destConfig);
 
-      const [srcInfo, destInfo] = await Promise.all([
-        srcClient.info(),
-        destClient.info(),
-      ]);
-
-      srcVersion  = parseInt(srcInfo.version?.number?.split('.')[0]  ?? '5', 10);
-      destVersion = parseInt(destInfo.version?.number?.split('.')[0] ?? '9', 10);
+      if (!sourceConfig.engineVersion || !destConfig.engineVersion) {
+        const [srcInfo, destInfo] = await Promise.all([
+          srcClient.info(),
+          destClient.info(),
+        ]);
+        if (!sourceConfig.engineVersion) {
+          srcVersion = parseInt(srcInfo.version?.number?.split('.')[0] ?? '5', 10);
+        }
+        if (!destConfig.engineVersion) {
+          destVersion = parseInt(destInfo.version?.number?.split('.')[0] ?? '9', 10);
+        }
+      }
     } catch (e) {
       // Fall back to defaults if info() fails
     }
@@ -150,7 +160,9 @@ export default function MigrationProposalRunner({
             indexName:   item.indexName,
             mapping,
             settings,
+            srcEngine,
             srcVersion,
+            destEngine,
             destVersion,
             onStatus: (msg) => updateItem(i, { statusMsg: t(`proposal.status_${msg}`) ?? msg }),
             onComplete: (proposal) => {
@@ -213,9 +225,19 @@ export default function MigrationProposalRunner({
     <Box flexDirection="column" minHeight={rows}>
       <AppHeader />
 
-      <Box paddingX={2} gap={1}>
-        <Text bold color="yellow">{t('proposal.runner_title')}</Text>
-        <Text dimColor>({done}/{total})</Text>
+      <Box paddingX={2} gap={1} flexDirection="column">
+        <Box gap={1}>
+          <Text bold color="yellow">{t('proposal.runner_title')}</Text>
+          <Text dimColor>({done}/{total})</Text>
+        </Box>
+        <Box gap={1}>
+          <Text color="yellow" dimColor>{formatEngineLabel(srcEngine, sourceConfig.engineVersion ?? '')}</Text>
+          <Text dimColor>→</Text>
+          <Text color="green" dimColor>{formatEngineLabel(destEngine, destConfig.engineVersion ?? '')}</Text>
+          {isCrossSolution(srcEngine, destEngine) && (
+            <Text color="cyan" dimColor> ⚡ {t('wizard.cross_solution_label')}</Text>
+          )}
+        </Box>
       </Box>
 
       <Text color="yellow" dimColor paddingX={2}>{'─'.repeat(width - 4)}</Text>

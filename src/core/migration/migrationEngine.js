@@ -5,7 +5,7 @@ import {
   createIndex, getDocumentCount, indexExists,
 } from '../elasticsearch/indexManager.js';
 import { scrollDocuments, bulkIndex } from '../elasticsearch/bulkOperations.js';
-import { convertMapping } from './mappingConverter.js';
+import { convertMapping, hasVectorFields } from './mappingConverter.js';
 import { convertSettings } from './analyzerConverter.js';
 import {
   cacheMapping, cacheSettings,
@@ -64,6 +64,13 @@ export async function runReader(jobData, onProgress) {
       await cacheSettings(indexName, sourceSettings);
     }
 
+    // ── Resolve engine types ───────────────────────────────────────────────
+
+    const srcEngine  = sourceConfig.engine  ?? 'elasticsearch';
+    const destEngine = destConfig.engine    ?? 'elasticsearch';
+
+    logger.info('Engine types resolved', { srcEngine, destEngine });
+
     // ── Choose mapping/settings source: AI proposal vs auto-converter ────────
 
     const aiProposal = loadProposal(indexName);
@@ -89,9 +96,26 @@ export async function runReader(jobData, onProgress) {
       }
     } else {
       logger.info('No AI proposal found, using auto-converter', { indexName });
-      finalMapping  = convertMapping(sourceMapping);
+      finalMapping  = convertMapping(sourceMapping, srcEngine, destEngine);
       finalSettings = convertSettings(sourceSettings);
     }
+
+    // ── OpenSearch knn settings injection ─────────────────────────────────────
+    // When destination is OpenSearch and the mapping contains knn_vector fields,
+    // the index MUST have "index.knn: true" in settings for the knn plugin.
+    if (destEngine === 'opensearch' && hasVectorFields(finalMapping)) {
+      logger.info('Adding index.knn: true for OpenSearch knn_vector fields', { indexName });
+      finalSettings = {
+        ...finalSettings,
+        index: {
+          ...(finalSettings.index ?? {}),
+          knn: true,
+        },
+      };
+    }
+
+    // Strip settings that are exclusive to the other engine
+    finalSettings = sanitizeSettingsForEngine(finalSettings, destEngine);
 
     if (!await indexExists(destClient, indexName)) {
       logger.info('Creating destination index', { indexName });
@@ -261,6 +285,48 @@ export async function runReader(jobData, onProgress) {
     if (sourceClient) await sourceClient.close().catch(() => {});
     if (destClient)   await destClient.close().catch(() => {});
   }
+}
+
+// ─── Settings sanitizer ───────────────────────────────────────────────────────
+
+/**
+ * Remove settings that are incompatible with the target engine.
+ * Prevents index creation failures when crossing ES ↔ OpenSearch.
+ *
+ * @param {object} settings
+ * @param {'elasticsearch'|'opensearch'} destEngine
+ * @returns {object}
+ */
+function sanitizeSettingsForEngine(settings, destEngine) {
+  if (!settings) return {};
+
+  // Fields that must always be stripped (read-only / immutable)
+  const alwaysStrip = [
+    'index.creation_date', 'index.uuid', 'index.version',
+    'index.provided_name', 'index.routing.allocation.initial_recovery',
+  ];
+
+  // ES-only settings to strip when targeting OpenSearch
+  const esOnly = ['xpack.', 'indices.breaker.'];
+
+  // OpenSearch-only settings to strip when targeting Elasticsearch
+  const osOnly = ['index.knn.space_type', 'plugins.'];
+
+  const stripPrefixes = destEngine === 'opensearch' ? esOnly : osOnly;
+
+  function clean(obj, path = '') {
+    if (!obj || typeof obj !== 'object') return obj;
+    const result = {};
+    for (const [k, v] of Object.entries(obj)) {
+      const fullKey = path ? `${path}.${k}` : k;
+      if (alwaysStrip.some(s => fullKey === s || fullKey.startsWith(s))) continue;
+      if (stripPrefixes.some(p => fullKey.startsWith(p))) continue;
+      result[k] = typeof v === 'object' && !Array.isArray(v) ? clean(v, fullKey) : v;
+    }
+    return result;
+  }
+
+  return clean(settings);
 }
 
 // ─── Writer ──────────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ import GeminiSpinner from './components/GeminiSpinner.jsx';
 import MigrationProposalRunner from './components/MigrationProposalRunner.jsx';
 import MigrationProposalReview from './components/MigrationProposalReview.jsx';
 import { createElasticsearchClient, testConnection } from '../core/elasticsearch/client.js';
+import { detectEngine, formatEngineLabel, isCrossSolution } from '../core/elasticsearch/engineDetector.js';
 import { listIndices, getIndexMapping } from '../core/elasticsearch/indexManager.js';
 import { getAllConnections, saveConnection } from '../database/connections.js';
 import { extractSortableFields } from '../utils/fieldUtils.js';
@@ -104,7 +105,10 @@ export default function MigrationWizard({ onComplete, onCancel }) {
         setLoading(false);
         return;
       }
-      logger.info('Source OK', { version: srcResult.version });
+
+      setLoadingText(t('wizard.detecting_engine'));
+      const srcEngine = await detectEngine(sc);
+      logger.info('Source engine detected', srcEngine);
 
       setLoadingText(t('wizard.testing_dest'));
       logger.info('Testing destination', { url: dc.url });
@@ -117,11 +121,17 @@ export default function MigrationWizard({ onComplete, onCancel }) {
         setLoading(false);
         return;
       }
-      logger.info('Destination OK', { version: dstResult.version });
 
-      setSourceConfig(sc);
-      setDestConfig(dc);
-      await loadIndicesFromConfig(sc);
+      setLoadingText(t('wizard.detecting_engine'));
+      const dstEngine = await detectEngine(dc);
+      logger.info('Dest engine detected', dstEngine);
+
+      const enrichedSrc = { ...sc, engine: srcEngine.engine, engineVersion: srcEngine.versionFull };
+      const enrichedDst = { ...dc, engine: dstEngine.engine, engineVersion: dstEngine.versionFull };
+
+      setSourceConfig(enrichedSrc);
+      setDestConfig(enrichedDst);
+      await loadIndicesFromConfig(enrichedSrc);
     } catch (err) {
       logger.error('Connection test failed', { error: err.message });
       setError(t('wizard.error_test', { error: err.message }));
@@ -149,8 +159,10 @@ export default function MigrationWizard({ onComplete, onCancel }) {
       await client.close();
 
       if (result.success) {
-        logger.info('Source connection OK', { version: result.version });
-        setSourceConfig(config);
+        setLoadingText(t('wizard.detecting_engine'));
+        const engineInfo = await detectEngine(config);
+        logger.info('Source engine detected', engineInfo);
+        setSourceConfig({ ...config, engine: engineInfo.engine, engineVersion: engineInfo.versionFull });
         setStep('destination');
       } else {
         setError(t('wizard.error_source', { error: result.error }));
@@ -173,8 +185,10 @@ export default function MigrationWizard({ onComplete, onCancel }) {
       await client.close();
 
       if (result.success) {
-        logger.info('Destination connection OK', { version: result.version });
-        setDestConfig(config);
+        setLoadingText(t('wizard.detecting_engine'));
+        const engineInfo = await detectEngine(config);
+        logger.info('Dest engine detected', engineInfo);
+        setDestConfig({ ...config, engine: engineInfo.engine, engineVersion: engineInfo.versionFull });
         setStep('save-connection');
       } else {
         setError(t('wizard.error_dest', { error: result.error }));
@@ -370,6 +384,11 @@ export default function MigrationWizard({ onComplete, onCancel }) {
             <Box gap={1}>
               <Text backgroundColor="yellow" color="black" bold>{t('connection.source_badge')}</Text>
               <Text color="white">{sourceConfig?.url}</Text>
+              {sourceConfig?.engine && (
+                <Text color="yellow" dimColor>
+                  [{formatEngineLabel(sourceConfig.engine, sourceConfig.engineVersion ?? '')}]
+                </Text>
+              )}
             </Box>
             {sourceConfig?.user && (
               <Text dimColor>   {t('connection.user_label')}{sourceConfig.user}</Text>
@@ -382,12 +401,27 @@ export default function MigrationWizard({ onComplete, onCancel }) {
             <Box gap={1}>
               <Text backgroundColor="green" color="black" bold>{t('connection.dest_badge')}</Text>
               <Text color="white">{destConfig?.url}</Text>
+              {destConfig?.engine && (
+                <Text color="green" dimColor>
+                  [{formatEngineLabel(destConfig.engine, destConfig.engineVersion ?? '')}]
+                </Text>
+              )}
             </Box>
             {destConfig?.user && (
               <Text dimColor>   {t('connection.user_label')}{destConfig.user}</Text>
             )}
             <Text dimColor>   SSL: {destConfig?.ssl ? t('connection.yes') : t('connection.no')}</Text>
           </Box>
+
+          {/* Cross-solution notice */}
+          {sourceConfig?.engine && destConfig?.engine && isCrossSolution(sourceConfig.engine, destConfig.engine) && (
+            <Box borderStyle="round" borderColor="cyan" paddingX={2} paddingY={0} marginBottom={1}>
+              <Text color="cyan" bold>{t('wizard.cross_solution_notice', {
+                src: formatEngineLabel(sourceConfig.engine, sourceConfig.engineVersion ?? ''),
+                dst: formatEngineLabel(destConfig.engine, destConfig.engineVersion ?? ''),
+              })}</Text>
+            </Box>
+          )}
 
           <Text> </Text>
           <Text>{t('wizard.save_label')}</Text>

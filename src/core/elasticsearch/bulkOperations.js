@@ -130,9 +130,20 @@ export async function* scrollDocuments(client, indexName, options = {}) {
     });
 
     let scrollId = response._scroll_id;
-    let hits = response.hits.hits;
 
-    while (hits && hits.length > 0) {
+    const hitsContainer = response.hits;
+    if (!hitsContainer) {
+      throw new Error(`Malformed initial scroll response from index "${indexName}": missing hits object`);
+    }
+
+    const total = hitsContainer.total?.value ?? hitsContainer.total ?? 0;
+    logger.info('Scroll initialised', { index: indexName, total });
+
+    _warnShardFailures(response, indexName, logger);
+
+    let hits = hitsContainer.hits ?? [];
+
+    while (hits.length > 0) {
       logger.debug('Scroll batch retrieved', { count: hits.length });
       yield hits;
 
@@ -142,8 +153,18 @@ export async function* scrollDocuments(client, indexName, options = {}) {
         scroll
       });
 
+      if (response.timed_out) {
+        logger.warn('Scroll batch timed out — results may be incomplete', { index: indexName });
+      }
+
+      _warnShardFailures(response, indexName, logger);
+
+      if (!response.hits) {
+        throw new Error(`Malformed scroll response from index "${indexName}": missing hits object`);
+      }
+
       scrollId = response._scroll_id;
-      hits = response.hits.hits;
+      hits = response.hits.hits ?? [];
     }
 
     // Clear scroll
@@ -254,6 +275,23 @@ export async function getFieldRange(client, indexName, fieldName) {
       error: error.message 
     });
     throw error;
+  }
+}
+
+/**
+ * Warn when a scroll response reports shard failures.
+ * Shard failures silently reduce the number of returned documents,
+ * making the migration appear successful with fewer docs than expected.
+ */
+function _warnShardFailures(response, indexName, log) {
+  const shards = response._shards;
+  if (shards && shards.failed > 0) {
+    log.warn('Scroll response has shard failures — document count will be lower than expected', {
+      index: indexName,
+      shards_total: shards.total,
+      shards_successful: shards.successful,
+      shards_failed: shards.failed,
+    });
   }
 }
 

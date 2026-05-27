@@ -44,12 +44,13 @@ export class LegacyElasticsearchClient {
    * @param {string} method - HTTP method
    * @param {string} path - API path
    * @param {object} body - Request body
+   * @param {number} timeoutMs - Socket timeout in ms (default 60s)
    * @returns {Promise<object>} Response data
    */
-  async request(method, path, body = null) {
+  async request(method, path, body = null, timeoutMs = 60000) {
     return new Promise((resolve, reject) => {
       const url = new URL(path, this.baseUrl);
-      
+
       const options = {
         method,
         hostname: url.hostname,
@@ -65,8 +66,9 @@ export class LegacyElasticsearchClient {
         options.headers['Authorization'] = `Basic ${this.auth}`;
       }
 
+      let bodyStr = null;
       if (body) {
-        const bodyStr = JSON.stringify(body);
+        bodyStr = JSON.stringify(body);
         options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
       }
 
@@ -77,10 +79,14 @@ export class LegacyElasticsearchClient {
           data += chunk;
         });
 
+        res.on('error', (err) => {
+          reject(new Error(`Response stream error: ${err.message}`));
+        });
+
         res.on('end', () => {
           try {
             const parsed = data ? JSON.parse(data) : {};
-            
+
             if (res.statusCode >= 200 && res.statusCode < 300) {
               resolve(parsed);
             } else {
@@ -96,8 +102,12 @@ export class LegacyElasticsearchClient {
         reject(err);
       });
 
-      if (body) {
-        req.write(JSON.stringify(body));
+      req.setTimeout(timeoutMs, () => {
+        req.destroy(new Error(`Request timeout after ${timeoutMs}ms: ${method} ${path}`));
+      });
+
+      if (bodyStr) {
+        req.write(bodyStr);
       }
 
       req.end();

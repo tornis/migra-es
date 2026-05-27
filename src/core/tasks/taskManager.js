@@ -68,11 +68,14 @@ export function initWriterQueue() {
   });
 
   writerQueue.on('failed', async (job, err) => {
-    const { taskId } = job.data;
+    const { taskId, count } = job.data;
     const redis = getRedisClient();
-    // Count failed docs from job result if available
     await redis.decr(`migration:${taskId}:pending`);
-    logger.error('Writer job failed (after retries)', { taskId, error: err.message });
+    // Whole batch failed — every document in it is lost. Track them so the
+    // final "failed" counter reflects reality and the task is not silently
+    // reported as a full success when some batches were dropped.
+    if (count > 0) await redis.incrby(`migration:${taskId}:failed`, count);
+    logger.error('Writer job failed (after retries)', { taskId, count, error: err.message });
     await _checkCompletion(taskId);
   });
 

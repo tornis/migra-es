@@ -193,19 +193,20 @@ export class LegacyElasticsearchClient {
     const params = new URLSearchParams();
     if (scroll) params.append('scroll', scroll);
     if (size) params.append('size', size);
-    
+
     const path = `/${index}/_search${params.toString() ? '?' + params.toString() : ''}`;
-    return this.request('POST', path, body);
+    // Scroll responses can be very large (indices with large documents).
+    // Use 5 min timeout matching the scroll context lifetime; fall back to
+    // 60 s for regular (non-scroll) searches.
+    const timeoutMs = scroll ? 300000 : 60000;
+    return this.request('POST', path, body, timeoutMs);
   }
 
   /**
    * Scroll API
    */
   async scroll({ scroll_id, scroll }) {
-    return this.request('POST', '/_search/scroll', {
-      scroll_id,
-      scroll
-    });
+    return this.request('POST', '/_search/scroll', { scroll_id, scroll }, 300000);
   }
 
   /**

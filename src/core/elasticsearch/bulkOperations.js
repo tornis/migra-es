@@ -2,8 +2,17 @@ import { createLogger } from '../../utils/logger.js';
 
 const logger = createLogger('BulkOperations');
 
+// ES default http.max_content_length is 100 MB. We stay 10 MB under to leave
+// room for HTTP headers and NDJSON framing overhead. Override via MAX_BULK_BYTES.
+const MAX_BULK_BYTES = parseInt(process.env.MAX_BULK_BYTES || String(90 * 1024 * 1024), 10);
+
 /**
- * Perform bulk indexing operation
+ * Perform bulk indexing operation.
+ *
+ * Automatically splits batches whose NDJSON payload would exceed MAX_BULK_BYTES
+ * (default 90 MB) to avoid 413 errors when the index contains large documents.
+ * Documents that exceed the limit even individually are counted as failures.
+ *
  * @param {Client} client - Elasticsearch client
  * @param {string} indexName - Target index name
  * @param {Array<object>} documents - Documents to index
@@ -13,6 +22,60 @@ const logger = createLogger('BulkOperations');
 export async function bulkIndex(client, indexName, documents, retries = 3) {
   if (!documents || documents.length === 0) {
     return { success: true, indexed: 0, failed: 0, errors: [] };
+  }
+
+  // Estimate the NDJSON payload size incrementally.
+  // Short-circuit as soon as we know the batch exceeds the limit so we avoid
+  // serialising every document in a large healthy batch.
+  let estimatedBytes = 0;
+  let exceedsLimit = false;
+  for (const doc of documents) {
+    const source = { ...doc._source };
+    if (doc._type && doc._type !== '_doc') source.source_type = doc._type;
+    estimatedBytes +=
+      Buffer.byteLength(JSON.stringify({ index: { _index: indexName, _id: doc._id } })) +
+      Buffer.byteLength(JSON.stringify(source)) +
+      2; // two newlines in NDJSON
+    if (estimatedBytes > MAX_BULK_BYTES) {
+      exceedsLimit = true;
+      break;
+    }
+  }
+
+  if (exceedsLimit) {
+    if (documents.length === 1) {
+      // A single document already exceeds the limit — it cannot be indexed.
+      const doc = documents[0];
+      logger.warn('Document exceeds MAX_BULK_BYTES and cannot be migrated', {
+        index: indexName,
+        id: doc._id,
+        maxBytes: MAX_BULK_BYTES,
+        hint: 'Raise MAX_BULK_BYTES env var or increase http.max_content_length on the destination cluster',
+      });
+      return {
+        success: false,
+        indexed: 0,
+        failed: 1,
+        errors: [{ id: doc._id, error: `Document exceeds bulk size limit of ${MAX_BULK_BYTES} bytes` }],
+      };
+    }
+
+    // Split in half and process each half independently so large documents
+    // are eventually isolated down to single-document requests.
+    logger.warn('Bulk payload exceeds size limit — splitting batch', {
+      index: indexName,
+      count: documents.length,
+      maxBytes: MAX_BULK_BYTES,
+    });
+    const mid = Math.ceil(documents.length / 2);
+    const left  = await bulkIndex(client, indexName, documents.slice(0, mid), retries);
+    const right = await bulkIndex(client, indexName, documents.slice(mid),     retries);
+    return {
+      success: left.success && right.success,
+      indexed: left.indexed  + right.indexed,
+      failed:  left.failed   + right.failed,
+      errors:  [...left.errors, ...right.errors],
+    };
   }
 
   try {
@@ -32,12 +95,12 @@ export async function bulkIndex(client, indexName, documents, retries = 3) {
       ];
     });
 
-    logger.debug('Executing bulk index', { 
-      index: indexName, 
-      count: documents.length 
+    logger.debug('Executing bulk index', {
+      index: indexName,
+      count: documents.length
     });
 
-    const response = await client.bulk({ 
+    const response = await client.bulk({
       body,
       refresh: false,
       timeout: '5m'
@@ -80,15 +143,15 @@ export async function bulkIndex(client, indexName, documents, retries = 3) {
 
     return result;
   } catch (error) {
-    logger.error('Bulk operation failed', { 
+    logger.error('Bulk operation failed', {
       error: error.message,
-      retries 
+      retries
     });
 
     // Retry logic
     if (retries > 0) {
       logger.info('Retrying bulk operation', { retriesLeft: retries - 1 });
-      await sleep(1000); // Wait 1 second before retry
+      await sleep(1000);
       return bulkIndex(client, indexName, documents, retries - 1);
     }
 
